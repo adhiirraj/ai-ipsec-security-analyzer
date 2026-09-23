@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Runtime output and local captures.  Keep directory placeholders tracked.
+reports/
+data/raw_pcaps/*
+!data/raw_pcaps/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/models/*
+!data/models/.gitkeep
+
+# Local configuration and editor files
+.env
+.vscode/
+.idea/
+
+# Firecrawl local parsing output
+.firecrawl/
