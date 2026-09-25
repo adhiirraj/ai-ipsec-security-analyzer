@@ -132,15 +132,11 @@ def run_experiment(label, ike_prop, esp_prop, mode, traffic, ip_version="ipv4"):
         iperf_proc = run_cmd(["docker", "exec", "vpn-server", "iperf3", "-s"], background=True)
         
     # 6. Run Traffic Generator
-<<<<<<< HEAD
     print(f"Generating {traffic} traffic...")
     gen_cmd = ["docker", "exec", "vpn-client", "python3", "/scripts/traffic_generator.py", "--type", traffic, "--duration", "2"]
-=======
-    print(f"Generating {traffic} traffic over {ip_version}...")
-    gen_cmd = ["docker", "exec", "vpn-client", "python3", "/scripts/traffic_generator.py", "--type", traffic, "--duration", "15"]
+
     if ip_version == "ipv6":
         gen_cmd.append("--ipv6")
->>>>>>> dfb650830562787739650f13b6dd754e84907510
     gen_res = run_cmd(gen_cmd)
     print(gen_res.stdout)
     if gen_res.stderr:
