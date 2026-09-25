@@ -32,6 +32,7 @@ class TestbedConfigRequest(BaseModel):
     ike: str
     esp: str
     traffic: str
+    ip_version: str
 
 @app.post("/api/run_testbed")
 def run_testbed_endpoint(config: TestbedConfigRequest):
@@ -39,14 +40,26 @@ def run_testbed_endpoint(config: TestbedConfigRequest):
     orchestrator.setup_testbed()
     
     # Check if PFS is enabled based on if a DH group is appended to ESP proposal
-    has_pfs = "-" in config.esp
+    has_pfs = "-" in config.esp and not config.esp.endswith("none")
     pfs_str = "pfs" if has_pfs else "nopfs"
     
-    label = f"custom_{config.ike.replace('-','')}_{config.esp.replace('-','')}_{pfs_str}_{config.mode}_{config.traffic}"
-    # Run the experiment
-    orchestrator.run_experiment(label, config.ike, config.esp, config.mode, config.traffic)
+    label = f"custom_{config.ike.replace('-','')}_{config.esp.replace('-','')}_{pfs_str}_{config.mode}_{config.ip_version}_{config.traffic}"
     
-    return {"status": "success", "message": "Traffic generated successfully!", "pcap_file": f"{label}.pcap"}
+    import io
+    from contextlib import redirect_stdout
+    
+    f = io.StringIO()
+    with redirect_stdout(f):
+        # Run the experiment
+        orchestrator.run_experiment(label, config.ike, config.esp, config.mode, config.traffic, config.ip_version)
+    logs = f.getvalue()
+    
+    return {
+        "status": "success", 
+        "message": "Traffic generated successfully!", 
+        "pcap_file": f"{label}.pcap",
+        "logs": logs
+    }
 
 app.add_middleware(
     CORSMiddleware,

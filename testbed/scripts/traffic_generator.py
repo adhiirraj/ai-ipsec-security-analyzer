@@ -79,11 +79,46 @@ def generate_video(duration: int):
             sock.sendto(payload, (TARGET_IP, 5004)) # Standard RTP port
         time.sleep(0.033) # ~30 FPS
 
+def generate_whatsapp(duration: int):
+    """Simulates WhatsApp Voice/Video Call (STUN/WebRTC-like over UDP)."""
+    print(f"Generating WhatsApp traffic for {duration} seconds...")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    payload = b'W' * 300
+    end_time = time.time() + duration
+    while time.time() < end_time:
+        sock.sendto(payload, (TARGET_IP, 3478))
+        time.sleep(0.04)
+
+def generate_email(duration: int):
+    """Simulates E-mail (SMTP/IMAP) traffic."""
+    print(f"Generating E-mail traffic for {duration} seconds...")
+    end_time = time.time() + duration
+    while time.time() < end_time:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.5)
+            sock.connect((TARGET_IP, 143))
+            sock.sendall(b"A001 LOGIN user pass\r\n")
+            sock.close()
+        except Exception:
+            pass
+        time.sleep(1.5)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Synthetic Traffic Generator")
-    parser.add_argument("--type", choices=["voip", "web", "bulk", "icmp", "video"], required=True)
+    parser.add_argument("--type", choices=["voip", "web", "bulk", "icmp", "video", "whatsapp", "email"], required=True)
     parser.add_argument("--duration", type=int, default=10, help="Duration in seconds")
+    parser.add_argument("--ipv6", action="store_true", help="Use IPv6 instead of IPv4")
     args = parser.parse_args()
+    
+    if args.ipv6:
+        TARGET_IP = "fd00::2"
+        orig_socket = socket.socket
+        def ipv6_socket(family=socket.AF_INET6, type=socket.SOCK_STREAM, proto=0, fileno=None):
+            if family == socket.AF_INET:
+                family = socket.AF_INET6
+            return orig_socket(family, type, proto, fileno)
+        socket.socket = ipv6_socket
     
     if args.type == "voip":
         generate_voip(args.duration)
@@ -95,3 +130,7 @@ if __name__ == "__main__":
         generate_icmp(args.duration)
     elif args.type == "video":
         generate_video(args.duration)
+    elif args.type == "whatsapp":
+        generate_whatsapp(args.duration)
+    elif args.type == "email":
+        generate_email(args.duration)
