@@ -1,0 +1,19 @@
+FROM alpine:3.19
+
+RUN apk update && \
+    apk add --no-cache \
+    strongswan \
+    iproute2 \
+    tcpdump \
+    iperf3 \
+    python3 \
+    curl
+
+# Disable the bypass-lan plugin which prevents IPsec from encrypting local Docker bridge traffic
+RUN rm -f /etc/strongswan.d/charon/bypass-lan.conf
+
+# Create directory for swanctl configs
+RUN mkdir -p /etc/swanctl/conf.d
+
+# charon is the IKE daemon. We run it in the foreground.
+CMD ["/usr/lib/strongswan/charon"]

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI IPsec Security Analyzer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans p-8">
+
+    <div class="max-w-6xl mx-auto">
+        <header class="flex items-center justify-between mb-8">
+            <h1 class="text-3xl font-bold text-blue-900">🛡️ IPsec-Sentinel AI Dashboard</h1>
+            <div class="text-sm text-gray-500">Hackathon Prototype v1.0</div>
+        </header>
+
+        <!-- Upload Section -->
+        <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+            <h2 class="text-xl font-semibold mb-4">Upload PCAP for Analysis</h2>
+            <div class="flex items-center gap-4">
+                <input type="file" id="pcapFile" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" accept=".pcap,.pcapng">
+                <button onclick="analyzePcap()" class="bg-blue-600 text-white px-6 py-2 rounded-md font-medium hover:bg-blue-700 transition">Analyze</button>
+            </div>
+            <div id="loading" class="hidden mt-4 text-blue-600 font-medium">🤖 AI is analyzing packet flows... please wait...</div>
+        </div>
+
+        <div id="results" class="hidden grid grid-cols-1 md:grid-cols-2 gap-8">
+            
+            <!-- Security Assessment -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-semibold">Security Assessment</h2>
+                    <div id="scoreBadge" class="px-4 py-2 rounded-full text-white font-bold text-xl"></div>
+                </div>
+                
+                <h3 class="font-medium text-gray-700 mb-2 border-b pb-2">Threat Findings</h3>
+                <ul id="findingsList" class="space-y-3 mb-6">
+                    <!-- Populated by JS -->
+                </ul>
+            </div>
+
+            <!-- AI Traffic Classification -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-2xl font-semibold mb-6">AI Traffic Classification</h2>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full bg-white">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="py-2 px-4 text-left">ESP Flow (SPI)</th>
+                                <th class="py-2 px-4 text-left">Predicted Traffic</th>
+                                <th class="py-2 px-4 text-left">Confidence</th>
+                            </tr>
+                        </thead>
+                        <tbody id="aiFlowsList" class="divide-y divide-gray-200">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        async function analyzePcap() {
+            const fileInput = document.getElementById('pcapFile');
+            if (!fileInput.files[0]) {
+                alert("Please select a PCAP file first!");
+                return;
+            }
+
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('results').classList.add('hidden');
+
+            const file = fileInput.files[0];
+
+            try {
+                const response = await fetch('http://localhost:8000/api/analyze?filename=' + encodeURIComponent(file.name), {
+                    method: 'POST',
+                    body: file,
+                    headers: {
+                        'Content-Type': 'application/octet-stream'
+                    }
+                });
+                const data = await response.json();
+                renderResults(data);
+            } catch (error) {
+                alert("Error connecting to API. Is the FastAPI backend running?");
+                console.error(error);
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
+        }
+
+        function renderResults(data) {
+            document.getElementById('results').classList.remove('hidden');
+
+            // Render Security Score
+            const sec = data.security_assessment;
+            const badge = document.getElementById('scoreBadge');
+            badge.innerText = `${sec.score} / 100 (${sec.risk_level})`;
+            
+            // Set Color based on risk
+            badge.className = "px-4 py-2 rounded-full text-white font-bold text-xl " + 
+                (sec.risk_level === 'LOW' ? 'bg-green-500' : 
+                 sec.risk_level === 'MEDIUM' ? 'bg-yellow-500' : 'bg-red-500');
+
+            // Render Findings
+            const findingsList = document.getElementById('findingsList');
+            findingsList.innerHTML = '';
+            sec.findings.forEach(finding => {
+                const li = document.createElement('li');
+                const color = finding.severity === 'CRITICAL' ? 'text-red-700 bg-red-100' :
+                              finding.severity === 'HIGH' ? 'text-orange-700 bg-orange-100' :
+                              finding.severity === 'WARNING' ? 'text-yellow-700 bg-yellow-100' : 'text-blue-700 bg-blue-100';
+                li.className = `p-3 rounded-md text-sm ${color}`;
+                li.innerHTML = `<strong>[${finding.severity}]</strong> ${finding.message}`;
+                findingsList.appendChild(li);
+            });
+
+            // Render AI Flows
+            const aiFlowsList = document.getElementById('aiFlowsList');
+            aiFlowsList.innerHTML = '';
+            
+            if (data.ai_analysis.length > 0 && !data.ai_analysis[0].error) {
+                data.ai_analysis.forEach(flow => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="py-3 px-4 font-mono text-xs text-gray-600">${flow.spi}</td>
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-bold uppercase">${flow.predicted_traffic}</span>
+                        </td>
+                        <td class="py-3 px-4">
+                            <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                                <div class="bg-blue-600 h-2.5 rounded-full" style="width: ${flow.confidence}%"></div>
+                            </div>
+                            <span class="text-xs text-gray-500">${flow.confidence}%</span>
+                        </td>
+                    `;
+                    aiFlowsList.appendChild(tr);
+                });
+            } else {
+                aiFlowsList.innerHTML = `<tr><td colspan="3" class="py-4 text-center text-red-500">Error: ${data.ai_analysis[0]?.error || 'No flows detected'}</td></tr>`;
+            }
+        }
+    </script>
+</body>
+</html>
