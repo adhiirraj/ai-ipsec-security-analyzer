@@ -8,27 +8,28 @@ import subprocess
 TARGET_IP = "10.0.0.2"
 VOIP_PORT = 5060
 WEB_PORT = 80
+SOCKET_FAMILY = socket.AF_INET
 
 def generate_voip(duration: int):
     """Simulates VoIP traffic (e.g., G.711 codec). 160 bytes of payload every 20ms."""
     print(f"Generating VoIP traffic for {duration} seconds...")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock = socket.socket(SOCKET_FAMILY, socket.SOCK_DGRAM)
     payload = b'A' * 160
     end_time = time.time() + duration
     packets_sent = 0
-    
+
     while time.time() < end_time:
         sock.sendto(payload, (TARGET_IP, VOIP_PORT))
         packets_sent += 1
         time.sleep(0.02) # 20ms
-        
+
     print(f"Sent {packets_sent} VoIP packets.")
 
 def generate_web(duration: int):
     """Simulates Web Browsing (HTTP GET and small response)."""
     # Since we don't have a real web server running on the server container right now,
     # we will just send TCP SYN packets or use UDP to simulate the asymmetric nature,
-    # OR we can just use curl against a netcat on the server, but for simplicity, 
+    # OR we can just use curl against a netcat on the server, but for simplicity,
     # let's just send asymmetric UDP bursts to simulate web flow if we don't care about TCP state,
     # BUT IPsec ESP doesn't care about TCP/UDP, it just encrypts the IP payload.
     # To be realistic for ML, TCP is better because of handshakes and ACKs.
@@ -39,7 +40,7 @@ def generate_web(duration: int):
         try:
             # We just attempt a connection. It will send a SYN. Server replies RST-ACK.
             # This generates small packets.
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock = socket.socket(SOCKET_FAMILY, socket.SOCK_STREAM)
             sock.settimeout(0.1)
             sock.connect((TARGET_IP, WEB_PORT))
             sock.sendall(b"GET / HTTP/1.1\r\nHost: server\r\n\r\n")
@@ -69,10 +70,10 @@ def generate_icmp(duration: int):
 def generate_video(duration: int):
     """Simulates Video Streaming (Bursty UDP traffic with large MTU packets)."""
     print(f"Generating Video streaming traffic for {duration} seconds...")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock = socket.socket(SOCKET_FAMILY, socket.SOCK_DGRAM)
     payload = b'V' * 1300 # Large packets typical for video
     end_time = time.time() + duration
-    
+
     while time.time() < end_time:
         # Send a burst of 30 frames (packets)
         for _ in range(30):
@@ -82,7 +83,7 @@ def generate_video(duration: int):
 def generate_whatsapp(duration: int):
     """Simulates WhatsApp Voice/Video Call (STUN/WebRTC-like over UDP)."""
     print(f"Generating WhatsApp traffic for {duration} seconds...")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock = socket.socket(SOCKET_FAMILY, socket.SOCK_DGRAM)
     payload = b'W' * 300
     end_time = time.time() + duration
     while time.time() < end_time:
@@ -95,7 +96,7 @@ def generate_email(duration: int):
     end_time = time.time() + duration
     while time.time() < end_time:
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock = socket.socket(SOCKET_FAMILY, socket.SOCK_STREAM)
             sock.settimeout(0.5)
             sock.connect((TARGET_IP, 143))
             sock.sendall(b"A001 LOGIN user pass\r\n")
@@ -110,16 +111,11 @@ if __name__ == "__main__":
     parser.add_argument("--duration", type=int, default=2, help="Duration in seconds")
     parser.add_argument("--ipv6", action="store_true", help="Use IPv6 instead of IPv4")
     args = parser.parse_args()
-    
+
     if args.ipv6:
         TARGET_IP = "fd00::2"
-        orig_socket = socket.socket
-        def ipv6_socket(family=socket.AF_INET6, type=socket.SOCK_STREAM, proto=0, fileno=None):
-            if family == socket.AF_INET:
-                family = socket.AF_INET6
-            return orig_socket(family, type, proto, fileno)
-        socket.socket = ipv6_socket
-    
+        SOCKET_FAMILY = socket.AF_INET6
+
     if args.type == "voip":
         generate_voip(args.duration)
     elif args.type == "web":
