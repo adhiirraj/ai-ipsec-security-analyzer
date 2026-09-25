@@ -74,8 +74,10 @@
         <!-- Testbed Control Tab -->
         <div id="view-testbed" class="hidden">
             <div class="bg-white p-6 rounded-lg shadow-md border-l-4 border-green-500">
-                <h2 class="text-2xl font-semibold mb-6">VPN Testbed Control Center</h2>
+                <h2 class="text-2xl font-semibold mb-4">VPN Testbed Control Center</h2>
+                <p class="text-xs text-gray-500 mb-6">Granular Configuration Mode: Combine parameters to test thousands of variations.</p>
                 
+                <!-- General Parameters -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">VPN Mode</label>
@@ -94,26 +96,76 @@
                             <option value="icmp">ICMP (Ping)</option>
                         </select>
                     </div>
+                </div>
+
+                <!-- IKE Phase 1 Parameters -->
+                <h3 class="font-bold text-gray-800 border-b pb-2 mb-4">IKE Proposal Settings (Phase 1)</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">IKE Proposal (Phase 1)</label>
-                        <select id="tb-ike" class="block w-full border-gray-300 rounded-md shadow-sm p-2 border">
-                            <option value="aes256gcm16-prfsha256-ecp256">AES-256-GCM / SHA256 / ECP256 (NIST Strong)</option>
-                            <option value="aes256-sha384-modp3072">AES-256-CBC / SHA384 / DH15 (Strong)</option>
-                            <option value="aes128-sha256-modp2048">AES-128-CBC / SHA256 / DH14 (Baseline)</option>
-                            <option value="aes128ctr-sha256-modp2048">AES-128-CTR / SHA256 / DH14 (Uncommon/Testing)</option>
-                            <option value="3des-sha1-modp1024">3DES / SHA1 / DH2 (Weak/Vulnerable)</option>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">IKE Encryption</label>
+                        <select id="tb-ike-enc" class="block w-full border-gray-300 rounded-md shadow-sm p-2 border text-sm">
+                            <option value="aes256gcm16">AES-256-GCM (AEAD)</option>
+                            <option value="aes256">AES-256-CBC</option>
+                            <option value="aes128ctr">AES-128-CTR</option>
+                            <option value="3des">3DES (Legacy/Weak)</option>
                         </select>
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">ESP Proposal (Phase 2 & PFS)</label>
-                        <select id="tb-esp" class="block w-full border-gray-300 rounded-md shadow-sm p-2 border">
-                            <option value="aes256gcm16-ecp256">AES-256-GCM + PFS Enabled</option>
-                            <option value="aes256gcm16">AES-256-GCM (NO PFS)</option>
-                            <option value="aes256-sha384-modp3072">AES-256-CBC + PFS Enabled</option>
-                            <option value="aes128-sha256">AES-128-CBC (NO PFS)</option>
-                            <option value="aes128ctr">AES-128-CTR (NO PFS)</option>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">IKE Hash / PRF</label>
+                        <select id="tb-ike-hash" class="block w-full border-gray-300 rounded-md shadow-sm p-2 border text-sm">
+                            <option value="sha256">SHA-256</option>
+                            <option value="sha384">SHA-384</option>
+                            <option value="sha1">SHA-1 (Legacy/Weak)</option>
                         </select>
                     </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">IKE DH Group</label>
+                        <select id="tb-ike-dh" class="block w-full border-gray-300 rounded-md shadow-sm p-2 border text-sm">
+                            <option value="ecp256">ECP-256 (Group 19)</option>
+                            <option value="modp2048">MODP-2048 (Group 14)</option>
+                            <option value="modp3072">MODP-3072 (Group 15)</option>
+                            <option value="modp1024">MODP-1024 (Group 2 - Weak)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- ESP Phase 2 Parameters -->
+                <h3 class="font-bold text-gray-800 border-b pb-2 mb-4">ESP Proposal Settings (Phase 2 & PFS)</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">ESP Encryption</label>
+                        <select id="tb-esp-enc" onchange="toggleEspIntegrity()" class="block w-full border-gray-300 rounded-md shadow-sm p-2 border text-sm">
+                            <option value="aes256gcm16">AES-256-GCM (AEAD)</option>
+                            <option value="aes128gcm16">AES-128-GCM (AEAD)</option>
+                            <option value="aes256">AES-256-CBC</option>
+                            <option value="aes128">AES-128-CBC</option>
+                            <option value="aes128ctr">AES-128-CTR</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">ESP Integrity (HMAC)</label>
+                        <select id="tb-esp-auth" class="block w-full border-gray-300 rounded-md shadow-sm p-2 border text-sm">
+                            <option value="none">None (AEAD selected)</option>
+                            <option value="sha256">SHA-256</option>
+                            <option value="sha384">SHA-384</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">PFS DH Group</label>
+                        <select id="tb-esp-pfs" class="block w-full border-gray-300 rounded-md shadow-sm p-2 border text-sm">
+                            <option value="none">Disabled (No PFS)</option>
+                            <option value="ecp256">ECP-256 (Group 19)</option>
+                            <option value="modp2048">MODP-2048 (Group 14)</option>
+                            <option value="modp3072">MODP-3072 (Group 15)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Active Custom Proposal Preview -->
+                <div class="mb-6 p-3 bg-gray-100 rounded border border-gray-200 text-xs font-mono">
+                    <span class="text-gray-500 font-sans font-semibold">Constructed Proposal Strings:</span><br>
+                    <strong>IKE String:</strong> <span id="preview-ike" class="text-blue-600"></span> | 
+                    <strong>ESP String:</strong> <span id="preview-esp" class="text-green-600"></span>
                 </div>
 
                 <div class="flex items-center gap-4">
@@ -138,6 +190,52 @@
     </div> <!-- End Main Container -->
 
     <script>
+        function updatePreviews() {
+            const ikeEnc = document.getElementById('tb-ike-enc').value;
+            const ikeHash = document.getElementById('tb-ike-hash').value;
+            const ikeDh = document.getElementById('tb-ike-dh').value;
+            const ikeString = `${ikeEnc}-${ikeHash}-${ikeDh}`;
+
+            const espEnc = document.getElementById('tb-esp-enc').value;
+            const espAuth = document.getElementById('tb-esp-auth').value;
+            const espPfs = document.getElementById('tb-esp-pfs').value;
+
+            let espParts = [espEnc];
+            if (espAuth !== 'none' && !espEnc.includes('gcm')) {
+                espParts.push(espAuth);
+            }
+            if (espPfs !== 'none') {
+                espParts.push(espPfs);
+            }
+            const espString = espParts.join('-');
+
+            document.getElementById('preview-ike').innerText = ikeString;
+            document.getElementById('preview-esp').innerText = espString;
+            return { ikeString, espString };
+        }
+
+        function toggleEspIntegrity() {
+            const espEnc = document.getElementById('tb-esp-enc').value;
+            const espAuthSelect = document.getElementById('tb-esp-auth');
+            if (espEnc.includes('gcm')) {
+                espAuthSelect.value = 'none';
+                espAuthSelect.disabled = true;
+            } else {
+                espAuthSelect.disabled = false;
+                if (espAuthSelect.value === 'none') espAuthSelect.value = 'sha256';
+            }
+            updatePreviews();
+        }
+
+        // Add event listeners to update dynamic strings
+        document.querySelectorAll('#view-testbed select').forEach(select => {
+            select.addEventListener('change', updatePreviews);
+        });
+        window.addEventListener('DOMContentLoaded', () => {
+            toggleEspIntegrity();
+            updatePreviews();
+        });
+
         function switchTab(tab) {
             if (tab === 'analyze') {
                 document.getElementById('view-analyze').classList.remove('hidden');
@@ -156,11 +254,13 @@
             document.getElementById('tb-loading').classList.remove('hidden');
             document.getElementById('tb-success').classList.add('hidden');
             
+            const { ikeString, espString } = updatePreviews();
+
             const payload = {
                 mode: document.getElementById('tb-mode').value,
                 traffic: document.getElementById('tb-traffic').value,
-                ike: document.getElementById('tb-ike').value,
-                esp: document.getElementById('tb-esp').value
+                ike: ikeString,
+                esp: espString
             };
 
             try {
