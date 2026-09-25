@@ -106,14 +106,9 @@ def generate_email(duration: int):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Synthetic Traffic Generator")
-<<<<<<< HEAD
-    parser.add_argument("--type", choices=["voip", "web", "bulk", "icmp", "video"], required=True)
-    parser.add_argument("--duration", type=int, default=2, help="Duration in seconds")
-=======
     parser.add_argument("--type", choices=["voip", "web", "bulk", "icmp", "video", "whatsapp", "email"], required=True)
-    parser.add_argument("--duration", type=int, default=10, help="Duration in seconds")
+    parser.add_argument("--duration", type=int, default=2, help="Duration in seconds")
     parser.add_argument("--ipv6", action="store_true", help="Use IPv6 instead of IPv4")
->>>>>>> dfb650830562787739650f13b6dd754e84907510
     args = parser.parse_args()
     
     if args.ipv6:

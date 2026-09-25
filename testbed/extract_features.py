@@ -5,22 +5,19 @@ import csv
 import statistics
 from scapy.all import rdpcap, ESP, IP, IPv6
 
-def extract_features_from_pcap(pcap_path, label):
+def extract_features_from_pcap(pcap_path, label="unknown"):
     print(f"Processing {pcap_path} (Label: {label})...")
     try:
-        # Scapy rdpcap loads everything into memory. 
-        # For huge PCAPs we'd use PcapReader, but for our 15s testbed this is fine.
         packets = rdpcap(pcap_path)
     except Exception as e:
         print(f"Error reading {pcap_path}: {e}")
         return []
 
-    flows = {} # Map of SPI -> list of packets
+    # Group by bidirectional IP pairs
+    sessions = {}
     
     for pkt in packets:
-        # Check if it has an ESP layer
         if ESP in pkt:
-            # Handle both IPv4 and IPv6
             if IP in pkt:
                 src = pkt[IP].src
                 dst = pkt[IP].dst
@@ -31,41 +28,66 @@ def extract_features_from_pcap(pcap_path, label):
                 continue
 
             spi = pkt[ESP].spi
-            # A unique flow is defined by (Source IP, Dest IP, SPI)
-            flow_key = (src, dst, spi)
             
-            if flow_key not in flows:
-                flows[flow_key] = []
-            flows[flow_key].append(pkt)
+            # Use sorted tuple to group bidirectionally
+            ip_pair = tuple(sorted([src, dst]))
+            
+            if ip_pair not in sessions:
+                sessions[ip_pair] = []
+            sessions[ip_pair].append((src, dst, spi, pkt))
             
     features = []
-    for flow_key, pkts in flows.items():
-        # Ignore tiny flows (e.g., VPN teardown packets or anomalies)
-        if len(pkts) < 10:
+    for ip_pair, pkt_data in sessions.items():
+        if len(pkt_data) < 10:
             continue
             
-        src, dst, spi = flow_key
+        # Sort chronologically
+        pkt_data.sort(key=lambda x: x[3].time)
         
-        # Sort packets strictly by timestamp
-        pkts.sort(key=lambda x: x.time)
+        # Determine forward direction from the first packet
+        forward_src = pkt_data[0][0]
         
-        sizes = [len(p) for p in pkts]
-        # Inter-arrival times (differences between consecutive packet timestamps)
-        iats = [float(pkts[i].time - pkts[i-1].time) for i in range(1, len(pkts))]
+        forward_pkts = 0
+        backward_pkts = 0
+        forward_bytes = 0
+        backward_bytes = 0
+        sizes = []
         
-        if not iats:
-            iats = [0.0]
+        for src, dst, spi, pkt in pkt_data:
+            size = len(pkt)
+            sizes.append(size)
+            if src == forward_src:
+                forward_pkts += 1
+                forward_bytes += size
+            else:
+                backward_pkts += 1
+                backward_bytes += size
+                
+        duration = float(pkt_data[-1][3].time - pkt_data[0][3].time)
+        if duration <= 0:
+            duration = 0.000001
             
+        packet_count = len(pkt_data)
+        total_bytes = sum(sizes)
+        
         feat = {
-            'spi': hex(spi),
-            'src_ip': src,
-            'dst_ip': dst,
-            'packet_count': len(pkts),
-            'total_bytes': sum(sizes),
+            'spi': hex(pkt_data[0][2]), # Just take first SPI as identifier
+            'src_ip': pkt_data[0][0],
+            'dst_ip': pkt_data[0][1],
+            'duration': round(duration, 6),
+            'packet_count': packet_count,
+            'total_bytes': total_bytes,
             'mean_packet_size': round(statistics.mean(sizes), 2),
             'std_packet_size': round(statistics.stdev(sizes), 2) if len(sizes) > 1 else 0.0,
-            'mean_iat': round(statistics.mean(iats), 6),
-            'std_iat': round(statistics.stdev(iats), 6) if len(iats) > 1 else 0.0,
+            'min_packet_size': min(sizes),
+            'max_packet_size': max(sizes),
+            'packet_rate': round(packet_count / duration, 2),
+            'byte_rate': round(total_bytes / duration, 2),
+            'forward_packets': forward_pkts,
+            'backward_packets': backward_pkts,
+            'forward_bytes': forward_bytes,
+            'backward_bytes': backward_bytes,
+            'direction_ratio': round(forward_pkts / max(1, backward_pkts), 4),
             'label': label
         }
         features.append(feat)
@@ -73,22 +95,18 @@ def extract_features_from_pcap(pcap_path, label):
     return features
 
 def main():
-    pcaps_dir = "pcaps"
-    output_csv = "dataset.csv"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    pcaps_dir = os.path.join(base_dir, "pcaps")
+    output_csv = os.path.join(base_dir, "../data/dataset.csv")
     
     if not os.path.exists(pcaps_dir):
         print(f"Error: Directory '{pcaps_dir}' not found.")
         return
         
     all_features = []
-    
-    # Iterate over all pcaps in the directory
     for pcap_file in glob.glob(os.path.join(pcaps_dir, "*.pcap")):
-        # Extract label from filename (e.g., aes128_tunnel_voip.pcap -> voip)
         basename = os.path.basename(pcap_file)
-        # Assuming our format is always crypto_mode_traffic.pcap
         name_without_ext = os.path.splitext(basename)[0]
-        
         try:
             traffic_label = name_without_ext.split('_')[-1]
         except IndexError:
@@ -101,7 +119,6 @@ def main():
         print("No ESP flows found to extract.")
         return
         
-    # Write to CSV
     keys = all_features[0].keys()
     with open(output_csv, 'w', newline='') as output_file:
         dict_writer = csv.DictWriter(output_file, fieldnames=keys)

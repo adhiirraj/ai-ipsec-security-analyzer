@@ -70,44 +70,15 @@ class TestbedConfigRequest(BaseModel):
     ike: str
     esp: str
     traffic: str
-<<<<<<< HEAD
+    ip_version: str
     duration: int = Field(default=15, ge=1, le=300)
 
 
 @app.post("/api/run_testbed")
 def run_testbed_endpoint(config: TestbedConfigRequest):
     with TESTBED_LOCK:
-        pfs_str = "pfs" if orchestrator.esp_has_pfs(config.esp) else "nopfs"
-=======
-    ip_version: str
-
-@app.post("/api/run_testbed")
-def run_testbed_endpoint(config: TestbedConfigRequest):
-    # Setup testbed (spins up containers if not running)
-    orchestrator.setup_testbed()
-    
-    # Check if PFS is enabled based on if a DH group is appended to ESP proposal
-    has_pfs = "-" in config.esp and not config.esp.endswith("none")
-    pfs_str = "pfs" if has_pfs else "nopfs"
-    
-    label = f"custom_{config.ike.replace('-','')}_{config.esp.replace('-','')}_{pfs_str}_{config.mode}_{config.ip_version}_{config.traffic}"
-    
-    import io
-    from contextlib import redirect_stdout
-    
-    f = io.StringIO()
-    with redirect_stdout(f):
-        # Run the experiment
-        orchestrator.run_experiment(label, config.ike, config.esp, config.mode, config.traffic, config.ip_version)
-    logs = f.getvalue()
-    
-    return {
-        "status": "success", 
-        "message": "Traffic generated successfully!", 
-        "pcap_file": f"{label}.pcap",
-        "logs": logs
-    }
->>>>>>> dfb650830562787739650f13b6dd754e84907510
+        has_pfs = "-" in config.esp and not config.esp.endswith("none")
+        pfs_str = "pfs" if has_pfs else "nopfs"
 
         label = (
             f"custom_"
@@ -115,22 +86,31 @@ def run_testbed_endpoint(config: TestbedConfigRequest):
             f"{config.esp.replace('-', '')}_"
             f"{pfs_str}_"
             f"{config.mode}_"
+            f"{config.ip_version}_"
             f"{config.traffic}"
         )
 
-        pcap_path = orchestrator.run_experiment(
-            label,
-            config.ike,
-            config.esp,
-            config.mode,
-            config.traffic,
-            config.duration,
-        )
+        import io
+        from contextlib import redirect_stdout
+        
+        f = io.StringIO()
+        with redirect_stdout(f):
+            orchestrator.run_experiment(
+                label,
+                config.ike,
+                config.esp,
+                config.mode,
+                config.traffic,
+                config.duration,
+                config.ip_version,
+            )
+        logs = f.getvalue()
 
     return {
         "status": "success",
         "message": "Traffic generated successfully!",
-        "pcap_file": pcap_path.name,
+        "pcap_file": f"{label}.pcap",
+        "logs": logs
     }
 
 
@@ -296,12 +276,20 @@ async def analyze_pcap_endpoint(request: Request, filename: str = "upload.pcap")
 
             if features_list:
                 feature_columns = [
+                    "duration",
                     "packet_count",
                     "total_bytes",
                     "mean_packet_size",
                     "std_packet_size",
-                    "mean_iat",
-                    "std_iat",
+                    "min_packet_size",
+                    "max_packet_size",
+                    "packet_rate",
+                    "byte_rate",
+                    "forward_packets",
+                    "backward_packets",
+                    "forward_bytes",
+                    "backward_bytes",
+                    "direction_ratio"
                 ]
 
                 df = pd.DataFrame(features_list)
