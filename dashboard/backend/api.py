@@ -70,6 +70,7 @@ class TestbedConfigRequest(BaseModel):
     ike: str
     esp: str
     traffic: str
+<<<<<<< HEAD
     duration: int = Field(default=15, ge=1, le=300)
 
 
@@ -77,6 +78,36 @@ class TestbedConfigRequest(BaseModel):
 def run_testbed_endpoint(config: TestbedConfigRequest):
     with TESTBED_LOCK:
         pfs_str = "pfs" if orchestrator.esp_has_pfs(config.esp) else "nopfs"
+=======
+    ip_version: str
+
+@app.post("/api/run_testbed")
+def run_testbed_endpoint(config: TestbedConfigRequest):
+    # Setup testbed (spins up containers if not running)
+    orchestrator.setup_testbed()
+    
+    # Check if PFS is enabled based on if a DH group is appended to ESP proposal
+    has_pfs = "-" in config.esp and not config.esp.endswith("none")
+    pfs_str = "pfs" if has_pfs else "nopfs"
+    
+    label = f"custom_{config.ike.replace('-','')}_{config.esp.replace('-','')}_{pfs_str}_{config.mode}_{config.ip_version}_{config.traffic}"
+    
+    import io
+    from contextlib import redirect_stdout
+    
+    f = io.StringIO()
+    with redirect_stdout(f):
+        # Run the experiment
+        orchestrator.run_experiment(label, config.ike, config.esp, config.mode, config.traffic, config.ip_version)
+    logs = f.getvalue()
+    
+    return {
+        "status": "success", 
+        "message": "Traffic generated successfully!", 
+        "pcap_file": f"{label}.pcap",
+        "logs": logs
+    }
+>>>>>>> dfb650830562787739650f13b6dd754e84907510
 
         label = (
             f"custom_"
