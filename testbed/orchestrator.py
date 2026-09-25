@@ -82,7 +82,7 @@ def setup_testbed():
     res = run_cmd(DOCKER_COMPOSE_CMD + ["up", "-d", "--build"], background=False)
     if res.returncode != 0:
         raise Exception("Docker compose failed")
-    time.sleep(3) # Wait for charon to start
+    time.sleep(2) # Wait for charon to start
 
 def run_experiment(label, ike_prop, esp_prop, mode, traffic):
     print(f"\n--- Running Experiment: {label} ---")
@@ -110,7 +110,7 @@ def run_experiment(label, ike_prop, esp_prop, mode, traffic):
         "tcpdump", "-i", "any", "-U", "udp port 500 or udp port 4500 or esp", "-w", pcap_file
     ], background=True)
     
-    time.sleep(1)
+    time.sleep(0.5)
     
     # 4. Initiate VPN
     print("Initiating IPsec tunnel...")
@@ -118,7 +118,7 @@ def run_experiment(label, ike_prop, esp_prop, mode, traffic):
     if "established successfully" not in init_res.stdout:
         print(f"Warning: Tunnel might not have established. Output: {init_res.stdout}\nStderr: {init_res.stderr}")
     
-    time.sleep(2)
+    time.sleep(1)
     
     # DIAGNOSTICS: Check if XFRM policies and states were actually installed
     print("\n--- XFRM STATE ---")
@@ -133,7 +133,7 @@ def run_experiment(label, ike_prop, esp_prop, mode, traffic):
         
     # 6. Run Traffic Generator
     print(f"Generating {traffic} traffic...")
-    gen_cmd = ["docker", "exec", "vpn-client", "python3", "/scripts/traffic_generator.py", "--type", traffic, "--duration", "15"]
+    gen_cmd = ["docker", "exec", "vpn-client", "python3", "/scripts/traffic_generator.py", "--type", traffic, "--duration", "2"]
     gen_res = run_cmd(gen_cmd)
     print(gen_res.stdout)
     if gen_res.stderr:
@@ -149,7 +149,7 @@ def run_experiment(label, ike_prop, esp_prop, mode, traffic):
     print("Stopping packet capture...")
     # Killing tcpdump gracefully inside the container to flush PCAP
     run_cmd(["docker", "exec", "vpn-sniffer", "killall", "-2", "tcpdump"])
-    time.sleep(2) # Give it time to flush to disk
+    time.sleep(0.5) # Give it time to flush to disk
     
     print(f"Experiment {label} complete.")
 

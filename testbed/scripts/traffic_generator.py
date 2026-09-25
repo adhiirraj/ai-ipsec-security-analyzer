@@ -47,7 +47,7 @@ def generate_web(duration: int):
             sock.close()
         except Exception:
             pass # We expect connection refused since no server is listening, but packets are sent!
-        time.sleep(0.5) # User reading time
+        time.sleep(0.2) # User reading time
 
 def generate_bulk(duration: int):
     """Simulates Bulk transfer using iperf3."""
@@ -77,12 +77,12 @@ def generate_video(duration: int):
         # Send a burst of 30 frames (packets)
         for _ in range(30):
             sock.sendto(payload, (TARGET_IP, 5004)) # Standard RTP port
-        time.sleep(0.033) # ~30 FPS
+        time.sleep(0.03) # ~30 FPS
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Synthetic Traffic Generator")
     parser.add_argument("--type", choices=["voip", "web", "bulk", "icmp", "video"], required=True)
-    parser.add_argument("--duration", type=int, default=10, help="Duration in seconds")
+    parser.add_argument("--duration", type=int, default=2, help="Duration in seconds")
     args = parser.parse_args()
     
     if args.type == "voip":

@@ -25,3 +25,6 @@ data/models/*
 .firecrawl/
 
 ./testbed/pcaps
+./data/raw_pcaps
+./data/pcap_generation_progress.json
+
