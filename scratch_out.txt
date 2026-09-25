@@ -1,0 +1,77 @@
+###[ cooked linux v2 ]###
+  proto     = IPv4
+  reserved  = 0
+  ifindex   = 2
+  lladdrtype= 0x1
+  pkttype   = sent-by-us
+  lladdrlen = 6
+  src       = b'\xde\xf5Q\x99\xd4\xcf'
+###[ IP ]###
+     version   = 4
+     ihl       = 5
+     tos       = 0x0
+     len       = 492
+     id        = 487
+     flags     = DF
+     frag      = 0
+     ttl       = 64
+     proto     = udp
+     chksum    = 0x2316
+     src       = 10.0.0.3
+     dst       = 10.0.0.2
+     \options   \
+###[ UDP ]###
+        sport     = isakmp
+        dport     = isakmp
+        len       = 472
+        chksum    = 0x15ee
+###[ ISAKMP ]###
+           init_cookie= 6e979fba5df6c039
+           resp_cookie= 0000000000000000
+           next_payload= 33
+           version   = 0x20
+           exch_type = 34
+           flags     = ?
+           id        = 0
+           length    = 464
+###[ ISAKMP payload ]###
+              next_payload= 34
+              res       = 0
+              length    = 48
+              load      = 0000002c010100040300000c0100000c800e0080030000080300000c0300000802000005000000080400000e
+###[ ISAKMP payload ]###
+              next_payload= 40
+              res       = 0
+              length    = 264
+              load      = 000e0000cc7c0a878d40cada5ff982f1066e75934eb7ed0544f7c6110701667a49c09ae4e4fbced853cd61107ba18efec39978c8d5d0a656805e18d7abe6c8e99edf7a98d15315431c57e01da502d3db8ecc8ac387b8eaa1e0d7ae85f92e14b67192952895c4ee251993f5ddc747374c2125848c9974d06eaa5ce4b1667cddf80997fccafee83c6a1ae0b4d60e85bb6731e87fec48a56193c9c36d7b10f6347170cb49a0273142829d405e685132042fad96af36ce1f4da95a97edee94ad23b779dd36b15b701c7f8ba58924bb294c2a295b073dc78a4d9ecd2ac8f4f16c3d5129ef87aa4ed44c0311af4a9cdbdfa49f435635ca065da428a32eee470dcdacc5f639485a
+###[ ISAKMP payload ]###
+              next_payload= 41
+              res       = 0
+              length    = 36
+              load      = fed7be484bdf5fa3a1f97307515fd20a9768a677c9601d2e98393753a497fea3
+###[ ISAKMP payload ]###
+              next_payload= 41
+              res       = 0
+              length    = 28
+              load      = 0000400461991781316008c32f4846b65709e32e7e1a8409
+###[ ISAKMP payload ]###
+              next_payload= 41
+              res       = 0
+              length    = 28
+              load      = 0000400526015be259dab2abdf57a7a7d6940f081f5e9e04
+###[ ISAKMP payload ]###
+              next_payload= 41
+              res       = 0
+              length    = 8
+              load      = 0000402e
+###[ ISAKMP payload ]###
+              next_payload= 41
+              res       = 0
+              length    = 16
+              load      = 0000402f0002000300040005
+###[ ISAKMP payload ]###
+              next_payload= None
+              res       = 0
+              length    = 8
+              load      = 00004016
+

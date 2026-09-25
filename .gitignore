@@ -23,3 +23,5 @@ data/models/*
 
 # Firecrawl local parsing output
 .firecrawl/
+
+./testbed/pcaps

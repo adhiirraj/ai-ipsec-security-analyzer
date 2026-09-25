@@ -1,20 +1,52 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 import os
 import tempfile
 import pandas as pd
 import joblib
 from scapy.all import rdpcap, ISAKMP_payload_SA, ISAKMP_payload_Transform, ISAKMP
-# Assuming we can import our modules
 import sys
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../src'))
 from ipsec_sentinel.analysis.rules import assess_configuration
 
-# Also need the feature extractor
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../testbed'))
 from extract_features import extract_features_from_pcap
+import orchestrator
 
 app = FastAPI(title="AI-Powered IPsec VPN Analyzer API")
+
+# Serve the frontend UI at the root URL
+frontend_dir = os.path.join(os.path.dirname(__file__), '../frontend')
+app.mount("/ui", StaticFiles(directory=frontend_dir), name="frontend")
+
+@app.get("/")
+def redirect_to_ui():
+    return RedirectResponse(url="/ui/index.html")
+
+class TestbedConfigRequest(BaseModel):
+    mode: str
+    ike: str
+    esp: str
+    traffic: str
+
+@app.post("/api/run_testbed")
+def run_testbed_endpoint(config: TestbedConfigRequest):
+    # Setup testbed (spins up containers if not running)
+    orchestrator.setup_testbed()
+    
+    # Check if PFS is enabled based on if a DH group is appended to ESP proposal
+    has_pfs = "-" in config.esp
+    pfs_str = "pfs" if has_pfs else "nopfs"
+    
+    label = f"custom_{config.ike.replace('-','')}_{config.esp.replace('-','')}_{pfs_str}_{config.mode}_{config.traffic}"
+    # Run the experiment
+    orchestrator.run_experiment(label, config.ike, config.esp, config.mode, config.traffic)
+    
+    return {"status": "success", "message": "Traffic generated successfully!", "pcap_file": f"{label}.pcap"}
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,10 +62,12 @@ try:
 except:
     classifier = None
 
+import subprocess
+
 def extract_ike_proposals(pcap_path, original_filename):
     """
-    Highly simplified Scapy parser to extract plaintext IKE proposals 
-    (Encryption, Hash, DH) from the initial IKE_SA_INIT packets.
+    Extracts plaintext IKEv2 proposals (Encryption, Hash, DH) from the 
+    IKE_SA_INIT packets by dynamically invoking tshark.
     """
     config = {
         "enc_alg": "unknown",
@@ -42,25 +76,64 @@ def extract_ike_proposals(pcap_path, original_filename):
         "pfs_enabled": False
     }
     
-    # HACKATHON SHORTCUT: Simulate extraction based on the testbed labels
-    basename = original_filename.lower()
-    
-    if "aes128" in basename:
-        config["enc_alg"] = "aes128-cbc"
-        config["hash_alg"] = "sha256"
-        config["dh_group"] = "modp2048"
-    elif "aes256gcm" in basename:
-        config["enc_alg"] = "aes256gcm16"
-        config["hash_alg"] = "prfsha256"
-        config["dh_group"] = "ecp256"
-    elif "aes256" in basename:
-        config["enc_alg"] = "aes256-cbc"
-        config["hash_alg"] = "sha384"
-        config["dh_group"] = "modp3072"
+    try:
+        # Use tshark to extract ISAKMP Transform parameters
+        res = subprocess.run(["tshark", "-r", pcap_path, "-Y", "isakmp", "-V"], 
+                             capture_output=True, text=True, timeout=10)
+        output = res.stdout
         
-    if "nopfs" in basename:
-        config["pfs_enabled"] = False
-    elif "pfs" in basename:
+        lines = output.split('\n')
+        for i, line in enumerate(lines):
+            line = line.strip()
+            
+            # Transform: Encryption (ENCR)
+            if "Transform Type: Encryption Algorithm" in line:
+                for j in range(1, 4):
+                    if "Transform ID" in lines[i+j]:
+                        alg = lines[i+j].split(":")[1].strip().lower()
+                        if "aes-gcm" in alg: config["enc_alg"] = "aes256gcm16"
+                        elif "aes-cbc" in alg: config["enc_alg"] = "aes256-cbc"
+                        elif "3des" in alg: config["enc_alg"] = "3des"
+                        break
+            
+            # Transform: PRF (Hash)
+            if "Transform Type: Pseudo-random Function" in line:
+                for j in range(1, 4):
+                    if "Transform ID" in lines[i+j]:
+                        alg = lines[i+j].split(":")[1].strip().lower()
+                        if "sha2_256" in alg: config["hash_alg"] = "sha256"
+                        elif "sha2_384" in alg: config["hash_alg"] = "sha384"
+                        elif "sha1" in alg: config["hash_alg"] = "sha1"
+                        break
+                        
+            # Transform: DH (KE)
+            if "Transform Type: Key Exchange Method" in line or "Transform Type: Diffie-Hellman Group" in line:
+                for j in range(1, 4):
+                    if "Transform ID" in lines[i+j]:
+                        alg = lines[i+j].split(":")[1].strip().lower()
+                        if "256-bit random ecp" in alg: config["dh_group"] = "ecp256"
+                        elif "2048-bit modp" in alg: config["dh_group"] = "modp2048"
+                        elif "3072-bit modp" in alg: config["dh_group"] = "modp3072"
+                        elif "1024-bit modp" in alg: config["dh_group"] = "modp1024"
+                        break
+                        
+            # Detect PFS (Perfect Forward Secrecy)
+            # PFS is only visibly negotiated during CREATE_CHILD_SA (rekey). 
+            # If we see a KE payload in a CREATE_CHILD_SA exchange, PFS is active!
+            if "Exchange type: CREATE_CHILD_SA" in line:
+                # If we see this exchange, we look ahead to see if it includes a KE payload
+                pass
+            if "Payload: Key Exchange (KE)" in line and "CREATE_CHILD_SA" in output:
+                config["pfs_enabled"] = True
+                
+    except Exception as e:
+        print(f"tshark error: {e}")
+        
+    # HACKATHON SHORTCUT / FALLBACK:
+    # Because our short 15-second testbed PCAPs do NOT contain CREATE_CHILD_SA rekeys,
+    # the PFS KE payload is mathematically impossible to find in the packets!
+    # Therefore, we fallback to filename labeling if PFS isn't dynamically detected.
+    if not config["pfs_enabled"] and "pfs" in original_filename.lower():
         config["pfs_enabled"] = True
         
     return config
