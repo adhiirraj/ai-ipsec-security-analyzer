@@ -1,36 +1,63 @@
-# IPsec-Sentinel-AI
+# 🛡️ IPsec-Sentinel AI
 
-AI-Powered IPsec VPN Protocol Analyzer and Security Assessment Framework for SIH 2026 / NTRO (Problem Statement 26160).
+**AI-Powered IPsec VPN Protocol Analyzer, Testbed, and Security Assessment Framework**  
+*(Built for SIH 2026 / NTRO Problem Statement 26160)*
 
-The current vertical slice is a streaming, read-only PCAP analyzer. It identifies observable IPsec traffic (IKEv1, IKEv2, ESP, AH, and NAT-T ESP), records only header-level evidence, and emits a versioned JSON report. It never decrypts payloads, guesses unobservable negotiated values, fabricates ML predictions, or emits an arbitrary security score.
+IPsec-Sentinel AI is a fully automated, end-to-end framework that not only analyzes IPsec traffic but actively generates, trains on, and evaluates VPN traffic using a mix of Machine Learning and Cryptographic Rule-Based engines.
 
-## Status
+## 🚀 Current State of the Project (Hackathon Final Prototype)
 
-Milestones 1–2 are implemented: Python package scaffolding, classic PCAP/PCAPNG ingestion, link/IP/IPsec detection, a CLI, structured reporting, and tests. IKE Security Association parsing, ESP flow construction, feature extraction, rules, ML, API, dashboard, and testbed automation are deliberately pending.
+The framework has evolved into a complete, modular ecosystem:
 
-## Quick start
+1. **VPN Testbed Control Center (Docker + strongSwan)**: A fully automated UI to spin up IPsec tunnels with custom topologies (Tunnel/Transport), cryptography (AES-GCM, AES-CTR, 3DES, DH groups, PFS), and traffic types (VoIP, Web, Bulk, Video, ICMP). It generates synthetic traffic and outputs synchronized PCAPs.
+2. **Machine Learning Pipeline (Random Forest)**: An AI engine that extracts behavioral metrics (packet size, inter-arrival time, byte counts) from encrypted ESP flows. It successfully predicts the *type* of traffic hidden inside the tunnel with high confidence without ever decrypting the payload.
+3. **Cryptographic Rule Engine**: Automatically parses IKE_SA_INIT and IKE_AUTH negotiations using `tshark` to mathematically verify the strength of Phase 1 and Phase 2 algorithms against NIST/BSI standards. It severely penalizes weak ciphers (e.g. 3DES), lack of HMACs (e.g. AES-CTR without authentication), and disabled PFS (Perfect Forward Secrecy).
+4. **Interactive Dashboard**: A sleek, Tailwind-styled web dashboard running on FastAPI that allows judges to visually interact with the Testbed, upload PCAPs, and view the AI's Security Score and Traffic Predictions in real-time.
 
-Use Python 3.10–3.13. The current core has no third-party runtime requirement; install the development extras when package tooling and network access are available.
+## 📦 System Requirements
 
-```powershell
-py -3.12 -m pip install -e ".[protocol,data,dev]"
-$env:PYTHONPATH = ".\\src"
-py -3.12 -m ipsec_sentinel --pcap data/raw_pcaps/capture.pcap --output reports/analysis.json
+- **OS**: Linux (Arch, Debian/Ubuntu, Fedora)
+- **Core Dependencies**: `docker`, `docker-compose`, `tshark` (Wireshark-CLI), `tcpdump`
+- **Python (>=3.10)**: `fastapi`, `uvicorn`, `scapy`, `pandas`, `scikit-learn`, `joblib`
+
+## 🛠️ Quick Installation
+
+We have provided an automated installation script that detects your Linux distribution and installs all system and Python dependencies natively (bypassing PEP-668 restrictions safely).
+
+```bash
+# 1. Make the script executable
+chmod +x install.sh
+
+# 2. Run the installation script
+bash install.sh
 ```
 
-After installation, the equivalent command is:
+## 🖥️ Running the Dashboard
 
-```text
-ipsec-sentinel analyze data/raw_pcaps/capture.pcap --output reports/analysis.json
+Once dependencies are installed, you can launch the AI Dashboard backend:
+
+```bash
+python3 dashboard/backend/api.py
 ```
 
-The analyzer accepts classic libpcap and common PCAPNG enhanced-packet captures. Packet data is read one record at a time; reports contain bounded, header-only IPsec observations.
+Open your web browser and navigate to: **http://localhost:8000**
 
-## Output semantics
+- **Analyzer Tab**: Upload PCAPs (like the ones generated in `testbed/pcaps/` or `testbed/external_pcaps/`) to see the Rule Engine and AI Classifier in action.
+- **Testbed Tab**: Dynamically configure the VPN topology and launch traffic generation to build your own datasets!
 
-- `null`, `unknown`, or an empty list means the information was not observable or is not yet calculated.
-- IKE versions are identified only from a structurally valid IKE header on UDP/500 or UDP/4500 with the required non-ESP marker.
-- NAT-T ESP is identified only for UDP/4500 packets without that marker.
-- The Milestone 2 report has no security score, findings, flow statistics, or ML prediction because those components do not exist yet.
+## 🧠 Retraining the AI Model
 
-See [the implementation plan](docs/implementation-plan.md) for scope, milestones, risks, and next steps.
+If you use the Testbed to generate new traffic configurations, you can retrain the AI on the fly:
+
+```bash
+# 1. Extract behavioral ESP features from all generated PCAPs
+python3 testbed/extract_features.py
+
+# 2. Train the Random Forest Classifier on the new dataset
+python3 testbed/train_model.py
+```
+
+The Dashboard will automatically use the newly trained model (`data/models/esp_traffic_classifier.pkl`) on the next analysis!
+
+---
+

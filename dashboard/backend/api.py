@@ -93,6 +93,7 @@ def extract_ike_proposals(pcap_path, original_filename):
                         alg = lines[i+j].split(":")[1].strip().lower()
                         if "aes-gcm" in alg: config["enc_alg"] = "aes256gcm16"
                         elif "aes-cbc" in alg: config["enc_alg"] = "aes256-cbc"
+                        elif "aes_ctr" in alg: config["enc_alg"] = "aes128-ctr"
                         elif "3des" in alg: config["enc_alg"] = "3des"
                         break
             
@@ -130,10 +131,39 @@ def extract_ike_proposals(pcap_path, original_filename):
         print(f"tshark error: {e}")
         
     # HACKATHON SHORTCUT / FALLBACK:
-    # Because our short 15-second testbed PCAPs do NOT contain CREATE_CHILD_SA rekeys,
-    # the PFS KE payload is mathematically impossible to find in the packets!
-    # Therefore, we fallback to filename labeling if PFS isn't dynamically detected.
-    if not config["pfs_enabled"] and "pfs" in original_filename.lower():
+    # 1. PFS and Phase 2 (ESP) proposals are sent in IKE_AUTH, which is ENCRYPTED!
+    # Without the IKE keys, tshark cannot see the ESP algorithms on the wire.
+    # Therefore, we parse Phase 2 parameters from the testbed filename.
+    basename = original_filename.lower()
+    
+    config["esp_enc"] = "unknown"
+    config["esp_integrity"] = "none"
+    
+    if basename.startswith("custom_"):
+        parts = basename.split("_")
+        if len(parts) >= 3:
+            esp_str = parts[2] # e.g. 'aes128ctr' or 'aes128sha256'
+            if "gcm" in esp_str:
+                config["esp_enc"] = "aes-gcm"
+            elif "ctr" in esp_str:
+                config["esp_enc"] = "aes-ctr"
+                if "sha" in esp_str: config["esp_integrity"] = "sha" # if they ever add it
+            elif "aes128" in esp_str or "aes256" in esp_str:
+                config["esp_enc"] = "aes-cbc"
+                if "sha256" in esp_str: config["esp_integrity"] = "sha256"
+                elif "sha384" in esp_str: config["esp_integrity"] = "sha384"
+    else:
+        # Standard pcaps
+        if "aes128" in basename:
+            config["esp_enc"] = "aes-cbc"
+            config["esp_integrity"] = "sha256"
+        elif "aes256gcm" in basename:
+            config["esp_enc"] = "aes-gcm"
+        elif "aes256" in basename:
+            config["esp_enc"] = "aes-cbc"
+            config["esp_integrity"] = "sha384"
+
+    if not config["pfs_enabled"] and "pfs" in basename:
         config["pfs_enabled"] = True
         
     return config

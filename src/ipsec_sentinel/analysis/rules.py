@@ -9,6 +9,7 @@ ALGORITHM_STRENGTHS = {
     # Encryption
     "aes128-cbc": "acceptable",
     "aes256-cbc": "strong",
+    "aes128-ctr": "weak", # CTR without auth is risky!
     "aes128gcm16": "strong",
     "aes256gcm16": "strong",
     "3des": "weak",
@@ -110,6 +111,29 @@ def assess_configuration(config: Dict[str, Any]) -> Dict[str, Any]:
         })
         score += 5 # Bonus
         
+    # 5. Check ESP Integrity (HMAC)
+    esp_enc = config.get("esp_enc")
+    esp_integrity = config.get("esp_integrity")
+    
+    if esp_enc and esp_enc != "unknown":
+        if "gcm" in esp_enc or "chacha20" in esp_enc:
+            findings.append({
+                "severity": "INFO",
+                "message": f"Phase 2 uses AEAD cipher ({esp_enc}). Integrity is built-in. No explicit HMAC needed."
+            })
+        else:
+            # Non-AEAD cipher, requires explicit HMAC
+            if esp_integrity == "none" or not esp_integrity:
+                findings.append({
+                    "severity": "CRITICAL",
+                    "message": f"CRITICAL: Phase 2 uses {esp_enc} WITHOUT an HMAC (Null Integrity)! This traffic is highly vulnerable to active bit-flipping manipulation."
+                })
+                score -= 40  # Massive penalty for missing HMAC
+            else:
+                eval_res = evaluate_algorithm("Phase 2 HMAC", esp_integrity)
+                findings.append({"severity": eval_res["severity"], "message": eval_res["message"]})
+                score -= eval_res["penalty"]
+
     # Ensure score stays within 0-100 bounds
     score = max(0, min(100, score))
     
