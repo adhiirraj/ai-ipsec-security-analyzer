@@ -1,0 +1,11 @@
+[
+  "custom_aes256gcm16sha256ecp256_aes256sha256_pfs_tunnel_voip",
+  "custom_aes256gcm16sha256ecp256_aes128gcm16_nopfs_tunnel_voip",
+  "custom_aes256gcm16sha256ecp256_aes256gcm16_nopfs_tunnel_voip",
+  "custom_aes256gcm16sha256ecp256_aes128gcm16modp3072_pfs_tunnel_voip",
+  "custom_aes256gcm16sha256ecp256_aes256gcm16modp2048_pfs_tunnel_voip",
+  "custom_aes256gcm16sha256ecp256_aes128gcm16ecp256_pfs_tunnel_voip",
+  "custom_aes256gcm16sha256ecp256_aes128gcm16modp2048_pfs_tunnel_voip",
+  "custom_aes256gcm16sha256ecp256_aes256gcm16modp3072_pfs_tunnel_voip",
+  "custom_aes256gcm16sha256ecp256_aes256gcm16ecp256_pfs_tunnel_voip"
+]
