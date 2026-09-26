@@ -29,3 +29,5 @@ data/models/*
 ./data/processed/*
 ./data/pcap_generation_progress.json
 
+*.pcap
+*.pcapng
