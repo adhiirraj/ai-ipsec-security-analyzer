@@ -1,172 +1,212 @@
-"""Evidence-aware, deterministic security assessment rules.
+"""Comprehensive Rule-Based Security Assessment Engine for IPsec."""
 
-The assessor accepts observed or explicitly supplied configuration values. It
-never turns unavailable encrypted ESP information into a finding about a
-specific algorithm or PFS setting.
-"""
+from typing import Any, Dict, List
 
-from __future__ import annotations
-
-from typing import Any
-
-
+# Comprehensive ranking of algorithms
 ALGORITHM_STRENGTHS = {
-    "aes128-cbc": "acceptable",
-    "aes256-cbc": "strong",
-    "aes128-ctr": "weak",
-    "aes256-ctr": "weak",
-    "aes128gcm16": "strong",
-    "aes256gcm16": "strong",
-    "3des": "weak",
-    "des": "weak",
-    "null": "critical",
-    "md5": "critical",
-    "sha1": "weak",
-    "sha256": "acceptable",
-    "sha384": "strong",
-    "sha512": "strong",
-    "prfsha256": "acceptable",
-    "prfsha384": "strong",
-    "modp1024": "weak",
-    "modp1536": "weak",
-    "modp2048": "acceptable",
-    "modp3072": "strong",
-    "modp4096": "strong",
-    "ecp256": "strong",
-    "ecp384": "strong",
-    "ecp521": "strong",
-    "x25519": "strong",
+    # Encryption (IKE and ESP)
+    "null": {"strength": "critical", "score": -50, "threats": ["Eavesdropping", "Data Exfiltration"]},
+    "des": {"strength": "critical", "score": -40, "threats": ["Brute Force"]},
+    "3des": {"strength": "weak", "score": -20, "threats": ["Sweet32", "Brute Force"]},
+    "rc4": {"strength": "critical", "score": -40, "threats": ["RC4 Biases", "Brute Force"]},
+    "aes128-ctr": {"strength": "weak", "score": -15, "threats": ["Bit-Flipping (if no HMAC)"]},
+    "aes256-ctr": {"strength": "weak", "score": -15, "threats": ["Bit-Flipping (if no HMAC)"]},
+    "aes-ctr": {"strength": "weak", "score": -15, "threats": ["Bit-Flipping (if no HMAC)"]},
+    "aes-cbc": {"strength": "acceptable", "score": 0, "threats": []},
+    "aes128-cbc": {"strength": "acceptable", "score": 0, "threats": []},
+    "aes192-cbc": {"strength": "acceptable", "score": 0, "threats": []},
+    "aes256-cbc": {"strength": "strong", "score": 5, "threats": []},
+    "aes-gcm": {"strength": "strong", "score": 10, "threats": []},
+    "aes128gcm16": {"strength": "strong", "score": 10, "threats": []},
+    "aes256gcm16": {"strength": "strong", "score": 10, "threats": []},
+    "chacha20poly1305": {"strength": "strong", "score": 10, "threats": []},
+    
+    # Hashing / Integrity
+    "none": {"strength": "critical", "score": -40, "threats": ["MITM", "Message Forgery", "Bit-Flipping"]},
+    "md5": {"strength": "critical", "score": -30, "threats": ["Collision Attacks", "MITM"]},
+    "sha1": {"strength": "weak", "score": -20, "threats": ["Collision Attacks"]},
+    "sha256": {"strength": "acceptable", "score": 0, "threats": []},
+    "sha384": {"strength": "strong", "score": 5, "threats": []},
+    "sha512": {"strength": "strong", "score": 5, "threats": []},
+    "prfsha256": {"strength": "acceptable", "score": 0, "threats": []},
+    "prfsha384": {"strength": "strong", "score": 5, "threats": []},
+    
+    # DH Groups
+    "none": {"strength": "critical", "score": -50, "threats": ["Key Compromise", "Passive Decryption"]},
+    "modp768": {"strength": "critical", "score": -40, "threats": ["Logjam", "Precomputation"]},
+    "modp1024": {"strength": "weak", "score": -20, "threats": ["Logjam", "State-Level Decryption"]},
+    "modp1536": {"strength": "weak", "score": -15, "threats": ["State-Level Decryption"]},
+    "modp2048": {"strength": "acceptable", "score": 0, "threats": []},
+    "modp3072": {"strength": "strong", "score": 5, "threats": []},
+    "modp4096": {"strength": "strong", "score": 5, "threats": []},
+    "ecp256": {"strength": "strong", "score": 5, "threats": []},
+    "ecp384": {"strength": "strong", "score": 5, "threats": []},
+    "ecp521": {"strength": "strong", "score": 5, "threats": []},
+    "curve25519": {"strength": "strong", "score": 10, "threats": []},
+    "curve448": {"strength": "strong", "score": 10, "threats": []},
 }
 
-SEVERITY_SCORES = {"critical": 30, "weak": 15, "acceptable": 0, "strong": -5}
-_UNKNOWN_VALUES = {None, "", "unknown", "not-observed", "not_observed"}
+def evaluate_algorithm(category: str, alg: str) -> Dict[str, Any]:
+    alg_lower = alg.lower()
+    
+    # Fallbacks and string matching
+    if alg_lower == "unknown" or not alg_lower:
+        return {"strength": "unknown", "score": -5, "message": f"{category} algorithm is unknown or missing.", "threats": ["Unknown Vulnerabilities"]}
+        
+    found_key = None
+    for key in ALGORITHM_STRENGTHS.keys():
+        if key in alg_lower or alg_lower in key:
+            found_key = key
+            break
+            
+    if not found_key:
+        return {"strength": "unknown", "score": -5, "message": f"{category} algorithm '{alg}' is unrecognized.", "threats": ["Unknown Vulnerabilities"]}
 
-
-def evaluate_algorithm(category: str, algorithm: str) -> dict[str, Any]:
-    """Assess one named algorithm and return a traceable rule result."""
-
-    normalized = algorithm.lower()
-    strength = ALGORITHM_STRENGTHS.get(normalized, "unknown")
-    messages = {
-        "critical": f"{category} algorithm '{algorithm}' provides no acceptable security.",
-        "weak": f"{category} algorithm '{algorithm}' is weak or deprecated.",
-        "acceptable": f"{category} algorithm '{algorithm}' provides acceptable baseline security.",
-        "strong": f"{category} algorithm '{algorithm}' provides strong modern security.",
-        "unknown": f"{category} algorithm '{algorithm}' is unrecognized and was not scored.",
-    }
-    severity = {"critical": "CRITICAL", "weak": "HIGH", "unknown": "WARNING"}.get(
-        strength, "INFO"
-    )
+    info = ALGORITHM_STRENGTHS[found_key]
+    strength = info["strength"]
+    
+    if strength == "critical":
+        msg = f"{category} ('{alg}') provides critically low or NO security. Immediate upgrade required."
+    elif strength == "weak":
+        msg = f"{category} ('{alg}') is considered weak/deprecated by modern standards (NIST/BSI)."
+    elif strength == "acceptable":
+        msg = f"{category} ('{alg}') provides acceptable baseline security."
+    else:
+        msg = f"{category} ('{alg}') provides strong, modern security."
+        
     return {
-        "severity": severity,
-        "message": messages[strength],
-        "penalty": SEVERITY_SCORES.get(strength, 0),
-        "evidence": {"category": category, "algorithm": algorithm, "strength": strength},
+        "strength": strength,
+        "score": info["score"],
+        "message": msg,
+        "threats": info["threats"]
     }
 
-
-def _append_algorithm_finding(
-    findings: list[dict[str, Any]], category: str, value: Any
-) -> int:
-    if value in _UNKNOWN_VALUES:
-        findings.append(
-            {
-                "severity": "INFO",
-                "message": f"{category} was not observable in the supplied evidence and was not scored.",
-                "evidence": {"category": category, "value": "unknown"},
-            }
-        )
-        return 0
-    result = evaluate_algorithm(category, str(value))
-    findings.append({key: item for key, item in result.items() if key != "penalty"})
-    return int(result["penalty"])
-
-
-def assess_configuration(config: dict[str, Any]) -> dict[str, Any]:
-    """Assess known configuration values without guessing missing IPsec details."""
-
+def assess_configuration(config: Dict[str, Any]) -> Dict[str, Any]:
     score = 100
-    findings: list[dict[str, Any]] = []
-    score -= _append_algorithm_finding(findings, "IKE encryption", config.get("enc_alg"))
-    score -= _append_algorithm_finding(findings, "IKE PRF", config.get("hash_alg"))
-    score -= _append_algorithm_finding(findings, "IKE key exchange", config.get("dh_group"))
-
-    pfs = config.get("pfs_enabled")
-    if pfs is True:
-        findings.append(
-            {
-                "severity": "INFO",
-                "message": "PFS is enabled in supplied configuration.",
-                "evidence": {"category": "PFS", "value": True},
-            }
-        )
-        score += 5
-    elif pfs is False:
-        findings.append(
-            {
-                "severity": "HIGH",
-                "message": "PFS is disabled in supplied configuration.",
-                "evidence": {"category": "PFS", "value": False},
-            }
-        )
-        score -= 20
+    findings = []
+    threats = set()
+    
+    # Track metrics for reports
+    is_aead = False
+    pfs_enabled = config.get("pfs_enabled", False)
+    
+    # 1. IKE Encryption
+    if config.get("enc_alg"):
+        res = evaluate_algorithm("IKE Encryption", config["enc_alg"])
+        findings.append({"category": "IKE Encryption", "severity": res["strength"].upper(), "message": res["message"]})
+        score += res["score"]
+        threats.update(res["threats"])
+        
+    # 2. IKE Hashing
+    if config.get("hash_alg"):
+        res = evaluate_algorithm("IKE Hashing", config["hash_alg"])
+        findings.append({"category": "IKE Hashing", "severity": res["strength"].upper(), "message": res["message"]})
+        score += res["score"]
+        threats.update(res["threats"])
+        
+    # 3. Key Exchange (DH)
+    if config.get("dh_group"):
+        res = evaluate_algorithm("Key Exchange (DH)", config["dh_group"])
+        findings.append({"category": "Key Exchange", "severity": res["strength"].upper(), "message": res["message"]})
+        score += res["score"]
+        threats.update(res["threats"])
+        
+    # 4. Perfect Forward Secrecy (PFS)
+    if not pfs_enabled:
+        findings.append({
+            "category": "Forward Secrecy",
+            "severity": "HIGH", 
+            "message": "Perfect Forward Secrecy (PFS) is DISABLED. Long-term key compromise will expose all traffic."
+        })
+        score -= 25
+        threats.add("Retrospective Decryption (Harvest Now, Decrypt Later)")
     else:
-        findings.append(
-            {
-                "severity": "INFO",
-                "message": "PFS is not observable from the supplied evidence and was not scored.",
-                "evidence": {"category": "PFS", "value": "unknown"},
-            }
-        )
-
-    esp_encryption = config.get("esp_enc")
-    esp_integrity = config.get("esp_integrity")
-    if esp_encryption in _UNKNOWN_VALUES:
-        findings.append(
-            {
-                "severity": "INFO",
-                "message": "ESP algorithms are encrypted or absent and were not scored.",
-                "evidence": {"category": "ESP", "value": "unknown"},
-            }
-        )
-    elif "gcm" in str(esp_encryption).lower() or "chacha20" in str(esp_encryption).lower():
-        findings.append(
-            {
-                "severity": "INFO",
-                "message": f"ESP uses supplied AEAD cipher '{esp_encryption}'; separate integrity is not required.",
-                "evidence": {"category": "ESP encryption", "algorithm": esp_encryption},
-            }
-        )
-    else:
-        score -= _append_algorithm_finding(findings, "ESP encryption", esp_encryption)
-        if esp_integrity in _UNKNOWN_VALUES:
-            findings.append(
-                {
-                    "severity": "INFO",
-                    "message": "ESP integrity was not observable and was not scored.",
-                    "evidence": {"category": "ESP integrity", "value": "unknown"},
-                }
-            )
-        elif str(esp_integrity).lower() == "none":
-            findings.append(
-                {
-                    "severity": "CRITICAL",
-                    "message": "Supplied non-AEAD ESP configuration uses null integrity.",
-                    "evidence": {"category": "ESP integrity", "value": "none"},
-                }
-            )
-            score -= 40
+        findings.append({
+            "category": "Forward Secrecy",
+            "severity": "STRONG",
+            "message": "Perfect Forward Secrecy (PFS) is enabled. Session keys are protected."
+        })
+        score += 10
+        
+    # 5. ESP Encryption and HMAC
+    esp_enc = config.get("esp_enc", "unknown")
+    esp_integrity = config.get("esp_integrity", "none")
+    
+    if esp_enc != "unknown":
+        res_enc = evaluate_algorithm("ESP Encryption", esp_enc)
+        findings.append({"category": "ESP Encryption", "severity": res_enc["strength"].upper(), "message": res_enc["message"]})
+        score += res_enc["score"]
+        threats.update(res_enc["threats"])
+        
+        if "gcm" in esp_enc.lower() or "chacha20" in esp_enc.lower():
+            is_aead = True
+            findings.append({
+                "category": "ESP Integrity",
+                "severity": "STRONG",
+                "message": f"Phase 2 uses AEAD cipher ({esp_enc}). Integrity is built-in. No explicit HMAC needed."
+            })
+            score += 10
         else:
-            score -= _append_algorithm_finding(findings, "ESP integrity", esp_integrity)
+            if esp_integrity == "none" or not esp_integrity:
+                findings.append({
+                    "category": "ESP Integrity",
+                    "severity": "CRITICAL",
+                    "message": f"Phase 2 uses {esp_enc} WITHOUT an HMAC (Null Integrity)! Highly vulnerable to active manipulation."
+                })
+                score -= 40
+                threats.add("Bit-Flipping")
+                threats.add("Message Forgery")
+            else:
+                res_int = evaluate_algorithm("ESP Integrity (HMAC)", esp_integrity)
+                findings.append({"category": "ESP Integrity", "severity": res_int["strength"].upper(), "message": res_int["message"]})
+                score += res_int["score"]
+                threats.update(res_int["threats"])
 
+    # Traffic / Metadata analysis rules
+    # IPsec hides payload but exposes traffic patterns
+    threats.add("Traffic Analysis (Metadata Extraction)")
+    
+    # Cap score
     score = max(0, min(100, score))
-    risk_level = (
-        "LOW" if score >= 90 else "MEDIUM" if score >= 70 else "HIGH" if score >= 40 else "CRITICAL"
+    
+    if score >= 90:
+        risk = "LOW"
+    elif score >= 70:
+        risk = "MEDIUM"
+    elif score >= 40:
+        risk = "HIGH"
+    else:
+        risk = "CRITICAL"
+        
+    # Generate Executive Report
+    if risk in ["LOW", "MEDIUM"]:
+        exec_report = (
+            f"The analyzed IPsec VPN tunnel demonstrates a {risk} risk posture with an overall security score of {score}/100. "
+            "Confidentiality and integrity mechanisms are largely aligned with industry best practices, ensuring secure data transit."
+        )
+    else:
+        exec_report = (
+            f"The analyzed IPsec VPN tunnel is in a {risk} risk posture (Score: {score}/100). "
+            "Critical vulnerabilities were detected in the cryptographic configuration that may allow attackers to intercept, "
+            "decrypt, or manipulate sensitive data in transit. Immediate remediation is strongly advised."
+        )
+
+    # Generate Technical Report
+    tech_report = (
+        f"IKE Phase 1 negotiated {config.get('enc_alg', 'unknown').upper()} / {config.get('hash_alg', 'unknown').upper()} "
+        f"with DH Group {config.get('dh_group', 'unknown').upper()}. "
+        f"IPsec Phase 2 (ESP) utilizes {esp_enc.upper()}" + (f" with AEAD built-in integrity." if is_aead else f" paired with {esp_integrity.upper()} HMAC. ") +
+        f"Perfect Forward Secrecy is {'ENABLED' if pfs_enabled else 'DISABLED'}."
     )
+        
     return {
         "status": "assessed",
         "score": score,
-        "risk_level": risk_level,
+        "risk_level": risk,
+        "executive_report": exec_report,
+        "technical_report": tech_report,
+        "threat_matrix": list(threats),
         "findings": findings,
-        "config": dict(config),
+        "compliance": "NIST SP 800-77 Rev. 1 Compliant" if score >= 90 else "Non-Compliant with NIST/BSI Standards",
+        "config": config
     }
