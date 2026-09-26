@@ -91,7 +91,13 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
-app.mount("/ui", StaticFiles(directory=FRONTEND_DIR), name="frontend")
+if FRONTEND_DIR.is_dir():
+    app.mount("/ui", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+else:
+    LOGGER.warning(
+        "Frontend directory %s does not exist; /ui will not serve static files.", FRONTEND_DIR
+    )
+
 
 
 class TestbedConfigRequest(BaseModel):

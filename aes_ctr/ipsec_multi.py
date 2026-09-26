@@ -7,9 +7,11 @@ Not interoperable with real IKEv2 or ESP. The exchange is NOT authenticated.
 import argparse
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 import struct
+import sys
 import time
 from pathlib import Path, PurePosixPath
 
@@ -18,7 +20,14 @@ from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from scapy.all import Ether, IP, UDP, Raw, PcapReader, PcapWriter
 
-import crypto_backend as backend
+# Load the sibling crypto_backend module by explicit file path so that this
+# script works correctly regardless of the caller's working directory.
+_BACKEND_PATH = Path(__file__).resolve().parent / "crypto_backend.py"
+_spec = importlib.util.spec_from_file_location("crypto_backend", _BACKEND_PATH)
+assert _spec is not None and _spec.loader is not None, f"Cannot locate crypto_backend at {_BACKEND_PATH}"
+backend = importlib.util.module_from_spec(_spec)
+sys.modules.setdefault("crypto_backend", backend)
+_spec.loader.exec_module(backend)  # type: ignore[union-attr]
 
 SRC, DST = '192.0.2.10', '198.51.100.20'
 SMAC, DMAC = '02:00:00:00:00:01', '02:00:00:00:00:02'

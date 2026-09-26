@@ -34,7 +34,10 @@ def test_traffic_generator_configuration_is_bounded_and_labels_synthetic() -> No
 
     assert arguments.type == "whatsapp"
     assert traffic_generator.settings_for_ip_version(True).target_ip == "fd00::2"
-    assert "not WhatsApp" in traffic_generator.generate_whatsapp.__doc__ if traffic_generator.generate_whatsapp.__doc__ else True
+    # Verify the function source explicitly labels this as NOT real WhatsApp traffic.
+    import inspect
+    src = inspect.getsource(traffic_generator.generate_whatsapp)
+    assert "not WhatsApp" in src, "generate_whatsapp must label its output as non-WhatsApp"
 
 
 def test_educational_simulator_round_trip(tmp_path: Path) -> None:
@@ -69,4 +72,5 @@ def test_educational_simulator_round_trip(tmp_path: Path) -> None:
         text=True,
     )
 
-    assert (recovered / source.name).read_bytes() == source.read_bytes()
+    # With --mode decrypt the simulator writes to out/decrypted/<name>.
+    assert (recovered / "decrypted" / source.name).read_bytes() == source.read_bytes()
