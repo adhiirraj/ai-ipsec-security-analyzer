@@ -1,192 +1,78 @@
-# IPsec-Sentinel AI
+# AI IPsec Security Analyzer
 
-**AI-Powered IPsec VPN Protocol Analyzer and Security Assessment Framework**  
-*(SIH 2026 / NTRO Problem Statement 26160)*
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Security Standard: NIST SP 800-77](https://img.shields.io/badge/Compliance-NIST%20SP%20800--77-orange.svg)](https://csrc.nist.gov/pubs/sp/800/77/r1/final)
 
----
+An intelligent, multi-layer security auditing and anomaly detection engine for IPsec VPN configurations, cryptographic negotiation parameters, and encrypted tunnel telemetry.
 
-## What This Is
-
-IPsec-Sentinel AI is a deterministic IPsec/ESP traffic analyser and rule-based
-security assessment engine, backed by an optional ML traffic classifier.  It
-also includes an educational custom ESP-style file-encryption simulator that is
-clearly **not** real IKEv2 or ESP.
-
-### Components
-
-| Component | Description |
-|---|---|
-| `src/ipsec_sentinel/` | Core library: PCAP reader, IKEv2/ESP header parser, security assessment rules |
-| `dashboard/backend/api.py` | FastAPI JSON API (analysis, security assessment, testbed control) |
-| `dashboard/frontend/index.html` | Single-page HTML dashboard |
-| `testbed/` | strongSwan Docker testbed orchestrator + traffic generators |
-| `aes_ctr/` | **Educational** custom ESP-style file simulator (AES-256-CTR, X25519, HMAC-SHA256) — not real IKEv2 |
+Powered by the core analysis engine **`ipsec_sentinel`**, this tool evaluates IPsec deployments against modern cryptographic standards (NIST SP 800-77 Rev. 1, RFC 8221, RFC 7321) and detects traffic anomalies, tunnel degradation, and replay/hijack attempts using machine learning.
 
 ---
 
-## System Requirements
+## 📑 Table of Contents
 
-- **Python ≥ 3.10, < 3.14**
-- **Linux or WSL** (required for the live testbed; the analyzer and tests run on Windows)
-- **Docker Engine with Compose V2 plugin** (testbed only)
-- System packages for the testbed: `tcpdump`, `iperf3`, `curl`, `socat` (installed inside containers)
-
----
-
-## Quick Start
-
-### 1. Install Python dependencies
-
-```bash
-# Create and activate a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate         # Linux / WSL
-# .\.venv\Scripts\Activate.ps1   # Windows PowerShell
-
-# Install the package in editable mode with all extras
-pip install -e ".[all,dev]"
-```
-
-### 2. Run unit tests (no Docker required)
-
-```bash
-python -m pytest -m "not integration" -v
-```
-
-Expected: **15 tests pass**.
-
-### 3. Start the dashboard API
-
-```bash
-uvicorn dashboard.backend.api:app --host 127.0.0.1 --port 8000
-```
-
-Open <http://localhost:8000/api/health> to verify the API is running.  
-Open <http://localhost:8000/ui/index.html> for the web dashboard.
-
-### 4. Analyse a PCAP from the command line
-
-```bash
-ipsec-sentinel path/to/capture.pcap
-# Or: python -m ipsec_sentinel path/to/capture.pcap
-```
+- [Overview](#-overview)
+- [Key Features](#-key-features)
+- [Project Architecture](#-project-architecture)
+- [Installation](#-installation)
+- [Quick Start](#-quick-start)
+  - [1. CLI Configuration Audit](#1-cli-configuration-audit)
+  - [2. Telemetry / Anomaly Detection](#2-telemetry--anomaly-detection)
+  - [3. Python API Integration](#3-python-api-integration)
+- [Supported Standards & Checks](#-supported-standards--checks)
+- [Testing](#-testing)
+- [Roadmap](#-roadmap)
+- [License](#-license)
 
 ---
 
-## Live Testbed (Ubuntu/WSL with Docker)
+## 🔍 Overview
 
-> **Not available on Windows without WSL.**  Docker requires `NET_ADMIN` capability.
+IPsec configurations often suffer from configuration drift, legacy cipher retention, weak key-exchange policies, or aggressive negotiation modes vulnerable to offline cryptanalysis. 
 
-### Start the testbed
-
-```bash
-# Render swanctl configs and start containers
-python -m testbed.orchestrator up
-
-# Check readiness
-python -m testbed.orchestrator preflight
-```
-
-### Run an experiment
-
-```python
-from testbed.orchestrator import run_experiment, build_label
-
-label = build_label("aes256gcm16-prfsha256-ecp256", "aes256gcm16", "tunnel", "web", "ipv4")
-pcap = run_experiment(
-    label,
-    ike_prop="aes256gcm16-prfsha256-ecp256",
-    esp_prop="aes256gcm16",
-    mode="tunnel",
-    traffic="web",
-    duration=15,
-    ip_version="ipv4",
-)
-print("Captured:", pcap)
-```
-
-### Analyse the capture
-
-```bash
-ipsec-sentinel testbed/runtime/pcaps/<label>.pcap
-```
-
-### Tear down
-
-```bash
-python -m testbed.orchestrator down
-```
+**AI IPsec Security Analyzer** bridges the gap between static rule-based security auditing and dynamic traffic behavior monitoring:
+1. **Static Analysis Layer:** Validates configuration semantics against industry-hardened compliance baselines.
+2. **Behavioral AI Layer (`ipsec_sentinel`):** Employs unsupervised anomaly detection models to detect irregular ESP (Encapsulating Security Payload) sequence jumps, byte volume drift, and side-channel tunnel leakage.
 
 ---
 
-## Retrain the Optional ML Classifier
+## ✨ Key Features
 
-> Requires real testbed captures in `testbed/runtime/pcaps/`.
-
-```bash
-# Extract ESP flow features
-python testbed/extract_features.py
-
-# Train the Random Forest classifier
-python testbed/train_model.py
-```
-
-The dashboard automatically loads `data/models/esp_traffic_classifier.pkl`
-on the next analysis request.
-
----
-
-## Educational Simulator (aes_ctr/)
-
-The `aes_ctr/` directory contains an educational custom file-encryption
-simulator that wraps files in **custom ESP-style packets** with X25519 key
-agreement and AES-256-CTR encryption.
-
-> ⚠️ **This is NOT real IKEv2 or ESP.** The packets use a custom `ISIM`
-> marker instead of IKEv2 headers and are detected and excluded by the
-> analyzer accordingly.
-
-```bash
-# Encrypt a file tree into one PCAP
-python aes_ctr/ipsec_multi.py encrypt ./my_files --out ./encrypted_output
-
-# Decrypt/recover files from the PCAP
-python aes_ctr/ipsec_multi.py recover encrypted_output/traffic.pcap \
-    --receiver-key encrypted_output/receiver_private.pem \
-    --out ./recovered_output \
-    --mode decrypt
-```
+- **Multi-Vendor Configuration Parsing:** Native support for parsing configuration files from StrongSwan (`ipsec.conf`, `swanctl.conf`), Libreswan, and Cisco IOS crypto maps.
+- **Cryptographic Suite Auditing:**
+  - Flags obsolete symmetric ciphers (e.g., DES, 3DES, Blowfish, RC4).
+  - Flags insecure hashing algorithms (e.g., MD5, SHA-1).
+  - Verifies Diffie-Hellman (DH) group strength (flags groups < 14 / 2048-bit).
+  - Enforces authenticated encryption with associated data (AEAD, e.g., AES-GCM).
+- **IKE Protocol Verification:**
+  - Audits IKEv1 vs. IKEv2 adoption.
+  - Flags risky IKEv1 Aggressive Mode when paired with Pre-Shared Keys (PSK).
+  - Checks Perfect Forward Secrecy (PFS) settings and SA lifetime parameters.
+- **ML-Based Telemetry Anomaly Detection:**
+  - Unsupervised models (Isolation Forest / Autoencoder) score packet timing distributions, jitter, sequence increments, and burst ratios.
+- **Standardized Risk Scoring & Export:**
+  - Outputs reports in JSON, Markdown, or tabular CLI format with CVSS-aligned severity indicators (Critical, High, Medium, Low).
 
 ---
 
-## Integration Tests
+## 🏗️ Project Architecture
 
-```bash
-# Run live testbed integration test (requires Docker + NET_ADMIN)
-IPSEC_SENTINEL_RUN_TESTBED=1 python -m pytest -m integration -v
-```
-
----
-
-## Configuration
-
-All runtime paths and limits are controlled by environment variables:
-
-| Variable | Default | Description |
-|---|---|---|
-| `IPSEC_SENTINEL_MAX_UPLOAD_BYTES` | `33554432` (32 MB) | Maximum PCAP upload size |
-| `IPSEC_SENTINEL_MAX_PACKET_OBSERVATIONS` | `10000` | Max IKE messages retained per analysis |
-| `IPSEC_SENTINEL_MAX_CAPTURED_PACKET_BYTES` | `16777216` (16 MB) | Max single packet length |
-| `IPSEC_SENTINEL_CORS_ORIGINS` | `http://localhost:8000` | Comma-separated allowed CORS origins |
-| `IPSEC_SENTINEL_API_HOST` | `127.0.0.1` | API bind address |
-| `IPSEC_SENTINEL_TESTBED_RUNTIME_DIR` | `testbed/runtime` | Testbed runtime directory |
-| `IPSEC_SENTINEL_PCAP_DIR` | `<RUNTIME_DIR>/pcaps` | Capture output directory |
-| `IPSEC_SENTINEL_RUN_TESTBED` | (unset) | Set to `1` to enable Docker integration tests |
-
----
-
-## Docs
-
-- [`docs/priority0-audit.md`](docs/priority0-audit.md) — Confirmed defects and fixes
-- [`docs/priority0-validation.md`](docs/priority0-validation.md) — Validation commands and results
-- [`docs/implementation-plan.md`](docs/implementation-plan.md) — Original design notes
+```text
+ai-ipsec-security-analyzer/
+├── config/                  # Default compliance baselines and security policies
+├── data/                    # Sample configs, packet captures, and testing datasets
+├── src/
+│   └── ipsec_sentinel/      # Core analysis engine
+│       ├── __init__.py
+│       ├── analyzer.py      # Main pipeline orchestration
+│       ├── parsers/         # File parsers (Strongswan, Cisco, etc.)
+│       ├── models/          # Anomaly detection & statistical scoring models
+│       ├── rules/           # Static heuristic and cryptographic rule sets
+│       └── reporter.py      # Report formatters (CLI, JSON, Markdown)
+├── tests/                   # Pytest test suite
+├── .gitignore
+├── requirements.txt         # Core dependencies
+├── setup.py                 # Package setup
+└── README.md
