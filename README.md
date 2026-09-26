@@ -5,9 +5,7 @@
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Security Standard: NIST SP 800-77](https://img.shields.io/badge/Compliance-NIST%20SP%20800--77-orange.svg)](https://csrc.nist.gov/pubs/sp/800/77/r1/final)
 
-An intelligent, multi-layer security auditing and anomaly detection engine for IPsec VPN configurations, cryptographic negotiation parameters, and encrypted tunnel telemetry.
-
-IPsec-Sentinel AI is a deterministic IPsec/ESP traffic analyser and rule-based security assessment engine, backed by an optional ML traffic classifier. It also includes an educational custom ESP-style file-encryption simulator that is clearly not real IKEv2 or ESP.
+An intelligent, multi-layer security auditing and anomaly detection engine for IPsec VPN configurations, cryptographic negotiation parameters, and encrypted tunnel telemetry. IPsec-Sentinel AI is a deterministic IPsec/ESP traffic analyser and rule-based security assessment engine, backed by a ML classifier. It also includes an educational custom ESP-style file encryption simulator which is clearly not real IKEv2 or ESP
 ---
 
 ## Table of Contents
