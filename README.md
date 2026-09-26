@@ -7,11 +7,10 @@
 
 An intelligent, multi-layer security auditing and anomaly detection engine for IPsec VPN configurations, cryptographic negotiation parameters, and encrypted tunnel telemetry.
 
-Powered by the core analysis engine **`ipsec_sentinel`**, this tool evaluates IPsec deployments against modern cryptographic standards (NIST SP 800-77 Rev. 1, RFC 8221, RFC 7321) and detects traffic anomalies, tunnel degradation, and replay/hijack attempts using machine learning.
-
+IPsec-Sentinel AI is a deterministic IPsec/ESP traffic analyser and rule-based security assessment engine, backed by an optional ML traffic classifier. It also includes an educational custom ESP-style file-encryption simulator that is clearly not real IKEv2 or ESP.
 ---
 
-## 📑 Table of Contents
+## Table of Contents
 
 - [Overview](#-overview)
 - [Key Features](#-key-features)
@@ -28,7 +27,7 @@ Powered by the core analysis engine **`ipsec_sentinel`**, this tool evaluates IP
 
 ---
 
-## 🔍 Overview
+## Overview
 
 IPsec configurations often suffer from configuration drift, legacy cipher retention, weak key-exchange policies, or aggressive negotiation modes vulnerable to offline cryptanalysis. 
 
@@ -38,7 +37,7 @@ IPsec configurations often suffer from configuration drift, legacy cipher retent
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 - **Multi-Vendor Configuration Parsing:** Native support for parsing configuration files from StrongSwan (`ipsec.conf`, `swanctl.conf`), Libreswan, and Cisco IOS crypto maps.
 - **Cryptographic Suite Auditing:**
@@ -57,7 +56,7 @@ IPsec configurations often suffer from configuration drift, legacy cipher retent
 
 ---
 
-## 🏗️ Project Architecture
+## Project Architecture
 
 ```text
 ai-ipsec-security-analyzer/
