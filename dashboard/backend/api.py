@@ -154,6 +154,8 @@ def extract_ike_proposals(pcap_path, original_filename):
 
         lines = res.stdout.splitlines()
 
+
+
         for i, line in enumerate(lines):
             line = line.strip()
 
@@ -303,14 +305,40 @@ async def analyze_pcap_endpoint(request: Request, filename: str = "upload.pcap")
                         "spi": feat["spi"],
                         "predicted_traffic": pred,
                         "confidence": round(conf, 2),
+                        "telemetry": {
+                            "mean_packet_size": feat["mean_packet_size"],
+                            "packet_rate": feat["packet_rate"],
+                            "byte_rate": feat["byte_rate"],
+                            "packet_count": feat["packet_count"],
+                            "duration": feat["duration"]
+                        }
                     }
                     for feat, pred, conf
                     in zip(features_list, predictions, probabilities)
                 ]
+                total_packets = sum(f["packet_count"] for f in features_list)
+                total_duration = max(f["duration"] for f in features_list) if features_list else 0
+            else:
+                total_packets = 0
+                total_duration = 0
+                response["ai_analysis"] = [
+                    {"error": "No valid ESP flows extracted for ML analysis."}
+                ]
+                
         else:
             response["ai_analysis"] = [
                 {"error": "ML Model not trained/found!"}
             ]
+            total_packets = 0
+            total_duration = 0
+
+        # Include PCAP metadata
+        import os
+        response["pcap_metadata"] = {
+            "file_size_kb": round(os.path.getsize(tmp_path) / 1024, 2),
+            "total_packets": total_packets,
+            "duration_sec": total_duration
+        }
 
         return response
 
