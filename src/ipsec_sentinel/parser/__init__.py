@@ -1,5 +1,3 @@
-"""Protocol-level packet parser stubs.
+from ipsec_sentinel.parser.ipsec import parse_packet
 
-Detailed parsers live in ipsec_sentinel.analysis.pipeline.  This package
-exists as a namespace for future per-protocol dissector modules.
-"""
+__all__ = ["parse_packet"]
