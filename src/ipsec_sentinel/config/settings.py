@@ -35,11 +35,23 @@ class AnalysisSettings:
 
     @classmethod
     def from_environment(cls) -> "AnalysisSettings":
-        """Read only explicit analyzer limits; no credentials are used in this slice."""
+        """Load bounded-analysis settings from explicit environment variables."""
 
         observation_limit = os.getenv("IPSEC_SENTINEL_MAX_PACKET_OBSERVATIONS")
-        if observation_limit is None:
-            return cls()
-        return cls(max_packet_observations=_positive_int(
-            observation_limit, "IPSEC_SENTINEL_MAX_PACKET_OBSERVATIONS"
-        ))
+        captured_bytes_limit = os.getenv("IPSEC_SENTINEL_MAX_CAPTURED_PACKET_BYTES")
+        return cls(
+            max_packet_observations=(
+                DEFAULT_MAX_PACKET_OBSERVATIONS
+                if observation_limit is None
+                else _positive_int(
+                    observation_limit, "IPSEC_SENTINEL_MAX_PACKET_OBSERVATIONS"
+                )
+            ),
+            max_captured_packet_bytes=(
+                DEFAULT_MAX_CAPTURED_PACKET_BYTES
+                if captured_bytes_limit is None
+                else _positive_int(
+                    captured_bytes_limit, "IPSEC_SENTINEL_MAX_CAPTURED_PACKET_BYTES"
+                )
+            ),
+        )

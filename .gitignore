@@ -27,4 +27,5 @@ data/models/*
 ./testbed/pcaps
 ./data/raw_pcaps
 ./data/pcap_generation_progress.json
+testbed/runtime/
 

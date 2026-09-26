@@ -10,7 +10,13 @@ services:
       - NET_ADMIN
       - NET_RAW
     volumes:
-      - ./configs/server/swanctl.conf:/etc/swanctl/swanctl.conf:ro
+      - ./runtime/configs/server/swanctl.conf:/etc/swanctl/swanctl.conf:ro
+    command: ["/usr/local/bin/start-server-workloads"]
+    healthcheck:
+      test: ["CMD-SHELL", "swanctl --list-sas >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     networks:
       vpn-net:
         ipv4_address: 10.0.0.2
@@ -25,7 +31,7 @@ services:
       - NET_ADMIN
       - NET_RAW
     volumes:
-      - ./configs/client/swanctl.conf:/etc/swanctl/swanctl.conf:ro
+      - ./runtime/configs/client/swanctl.conf:/etc/swanctl/swanctl.conf:ro
       - ./scripts:/scripts:ro
     networks:
       vpn-net:
@@ -33,7 +39,12 @@ services:
         ipv6_address: fd00::3
     # Start charon in background, then we can run traffic generators
     # Actually, we can just run charon and use docker exec for traffic.
-    command: ["/usr/lib/strongswan/charon"]
+    command: ["charon"]
+    healthcheck:
+      test: ["CMD-SHELL", "swanctl --list-sas >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   sniffer:
     image: nicolaka/netshoot
@@ -45,12 +56,13 @@ services:
     # before and after ESP encryption.
     network_mode: "service:vpn-client"
     volumes:
-      - ./pcaps:/pcaps
+      - ./runtime/pcaps:/pcaps
     # We will trigger the tcpdump command via docker exec in the orchestrator, 
     # but we need the container to stay alive.
     command: ["sleep", "infinity"]
     depends_on:
-      - vpn-client
+      vpn-client:
+        condition: service_healthy
 
 networks:
   vpn-net:

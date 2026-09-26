@@ -1,169 +1,262 @@
 #!/usr/bin/env python3
+"""Explicit lifecycle control for the local strongSwan Docker testbed.
+
+Importing this module performs no Docker calls.  Captures produced here are
+intended to be real testbed traffic only after the command verifies a loaded
+SA, successful workload, and a non-empty PCAP.
+"""
+
+from __future__ import annotations
+
+import argparse
 import os
-import time
-import subprocess
 from pathlib import Path
+import re
+import shutil
+import subprocess
+import time
+from typing import Iterable
 
-import itertools
 
-# Hackathon Requirements:
-# Modes: Tunnel, Transport
-# Cryptography: AES-128, AES-256, AES-GCM, AES-CBC+HMAC
-# PFS: Enabled/Disabled
-# Traffic: VoIP, Web, Bulk, ICMP, Video
+TESTBED_DIR = Path(__file__).resolve().parent
+RUNTIME_DIR = Path(os.getenv("IPSEC_SENTINEL_TESTBED_RUNTIME_DIR", TESTBED_DIR / "runtime"))
+PCAP_DIR = Path(os.getenv("IPSEC_SENTINEL_PCAP_DIR", RUNTIME_DIR / "pcaps"))
+CONFIG_DIR = RUNTIME_DIR / "configs"
+COMPOSE_FILE = TESTBED_DIR / "docker-compose.yml"
+VALID_MODES = {"tunnel", "transport"}
+VALID_TRAFFIC = {"voip", "web", "bulk", "icmp", "video", "whatsapp", "email"}
+VALID_IP_VERSIONS = {"ipv4", "ipv6"}
+_SAFE_LABEL = re.compile(r"^[A-Za-z0-9_.-]{1,180}$")
 
-MODES = ["tunnel", "transport"]
 
-# IKE and ESP combinations
-# Tuple format: (ike_proposal, esp_proposal, label_prefix)
-CRYPTO_SUITES = [
-    # AES-128-CBC + HMAC-SHA256 (No PFS)
-    ("aes128-sha256-modp2048", "aes128-sha256", "aes128_nopfs"),
-    # AES-256-CBC + HMAC-SHA384 (PFS enabled with DH 15 / modp3072)
-    ("aes256-sha384-modp3072", "aes256-sha384-modp3072", "aes256_pfs"),
-    # AES-256-GCM (No PFS)
-    ("aes256gcm16-prfsha256-ecp256", "aes256gcm16", "aes256gcm_nopfs"),
-]
+class TestbedError(RuntimeError):
+    """A prerequisite or live testbed operation failed."""
 
-TRAFFIC_TYPES = ["voip", "web", "bulk", "icmp", "video"]
 
-CONFIG_MATRIX = []
-for mode, (ike, esp, crypto_lbl), traffic in itertools.product(MODES, CRYPTO_SUITES, TRAFFIC_TYPES):
-    label = f"{crypto_lbl}_{mode}_{traffic}"
-    CONFIG_MATRIX.append((label, ike, esp, mode, traffic))
+def _run(command: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    try:
+        result = subprocess.run(
+            command,
+            cwd=TESTBED_DIR,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError as error:
+        raise TestbedError(f"Required executable is unavailable: {command[0]}") from error
+    except subprocess.TimeoutExpired as error:
+        raise TestbedError(f"Command timed out after {timeout}s: {' '.join(command)}") from error
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip() or "no command output"
+        raise TestbedError(f"Command failed ({result.returncode}): {' '.join(command)}\n{detail}")
+    return result
 
-print(f"Generated a comprehensive matrix of {len(CONFIG_MATRIX)} IPsec configurations!")
 
-BASE_DIR = Path(__file__).parent.resolve()
+def get_docker_compose_command() -> list[str]:
+    """Find Compose only when a caller asks to use the testbed."""
 
-def render_template(template_name: str, output_name: str, context: dict):
-    template_path = BASE_DIR / "templates" / template_name
-    output_path = BASE_DIR / "configs" / output_name
-    
-    with open(template_path, 'r') as f:
-        content = f.read()
-        
-    for key, value in context.items():
-        content = content.replace(f"{{{{ {key} }}}}", value)
-        
-    os.makedirs(output_path.parent, exist_ok=True)
-    with open(output_path, 'w') as f:
-        f.write(content)
-
-def run_cmd(cmd: list[str], background=False):
-    if background:
-        return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=BASE_DIR)
-    else:
-        res = subprocess.run(cmd, capture_output=True, text=True, cwd=BASE_DIR)
-        if res.returncode != 0:
-            print(f"Command failed: {' '.join(cmd)}\nStdout: {res.stdout}\nStderr: {res.stderr}")
-        return res
-
-def get_docker_compose_cmd():
-    # Check if 'docker compose' (v2) works
-    res = subprocess.run(["docker", "compose", "version"], capture_output=True, text=True)
-    if res.returncode == 0 and "version" in res.stdout.lower():
-        return ["docker", "compose"]
-    
-    # Fallback to 'docker-compose' (v1)
-    res = subprocess.run(["docker-compose", "--version"], capture_output=True, text=True)
-    if res.returncode == 0:
+    if shutil.which("docker"):
+        try:
+            result = subprocess.run(
+                ["docker", "compose", "version"], capture_output=True, text=True, timeout=10, check=False
+            )
+        except OSError:
+            result = None
+        if result is not None and result.returncode == 0:
+            return ["docker", "compose"]
+    if shutil.which("docker-compose"):
         return ["docker-compose"]
-        
-    raise Exception("Neither 'docker compose' nor 'docker-compose' was found on this system.")
+    raise TestbedError(
+        "Docker Compose was not found. Install Docker Engine with the Compose plugin, then rerun from Ubuntu/WSL."
+    )
 
-DOCKER_COMPOSE_CMD = get_docker_compose_cmd()
 
-def setup_testbed():
-    print(f"Starting Docker containers using {' '.join(DOCKER_COMPOSE_CMD)}...")
-    os.makedirs(BASE_DIR / "pcaps", exist_ok=True)
-    os.makedirs(BASE_DIR / "configs" / "server", exist_ok=True)
-    os.makedirs(BASE_DIR / "configs" / "client", exist_ok=True)
-    res = run_cmd(DOCKER_COMPOSE_CMD + ["up", "-d", "--build"], background=False)
-    if res.returncode != 0:
-        raise Exception("Docker compose failed")
-    time.sleep(2) # Wait for charon to start
+def preflight() -> dict[str, object]:
+    """Return non-mutating testbed readiness information for the API health route."""
 
-def run_experiment(label, ike_prop, esp_prop, mode, traffic, ip_version="ipv4"):
-    print(f"\n--- Running Experiment: {label} ---")
-    
-    # 1. Render configs
-    context = {
-        "ike_proposals": ike_prop,
-        "esp_proposals": esp_prop,
-        "mode": mode
+    available = bool(shutil.which("docker") or shutil.which("docker-compose"))
+    return {
+        "docker_or_compose_on_path": available,
+        "compose_file_exists": COMPOSE_FILE.is_file(),
+        "runtime_directory": str(RUNTIME_DIR),
+        "starts_on_health_check": False,
     }
-    render_template("server_swanctl.conf.template", "server/swanctl.conf", context)
-    render_template("client_swanctl.conf.template", "client/swanctl.conf", context)
-    
-    # 2. Load configs into running containers
-    print("Loading IPsec configurations...")
-    run_cmd(["docker", "exec", "vpn-server", "swanctl", "--load-all"])
-    run_cmd(["docker", "exec", "vpn-client", "swanctl", "--load-all"])
-    
-    # 3. Start PCAP capture in sniffer
-    pcap_file = f"/pcaps/{label}.pcap"
-    print(f"Starting packet capture to {pcap_file}...")
-    # BPF: capture IKE (500,4500) and ESP (50)
-    sniffer_proc = run_cmd([
-        "docker", "exec", "vpn-sniffer", 
-        "tcpdump", "-i", "any", "-U", "udp port 500 or udp port 4500 or esp", "-w", pcap_file
-    ], background=True)
-    
-    time.sleep(0.5)
-    
-    # 4. Initiate VPN
-    print("Initiating IPsec tunnel...")
-    init_res = run_cmd(["docker", "exec", "vpn-client", "swanctl", "--initiate", "--child", "net"])
-    if "established successfully" not in init_res.stdout:
-        print(f"Warning: Tunnel might not have established. Output: {init_res.stdout}\nStderr: {init_res.stderr}")
-    
+
+
+def _read_template(name: str) -> str:
+    path = TESTBED_DIR / "templates" / name
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError as error:
+        raise TestbedError(f"Missing strongSwan template: {path}") from error
+
+
+def _proposal_is_safe(proposal: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9-]+", proposal))
+
+
+def render_swanctl_configs(ike_proposal: str, esp_proposal: str, mode: str) -> tuple[Path, Path]:
+    """Render runtime-only configs; do not overwrite tracked baseline configs."""
+
+    if mode not in VALID_MODES:
+        raise TestbedError(f"Unsupported IPsec mode '{mode}'. Expected one of {sorted(VALID_MODES)}.")
+    if not _proposal_is_safe(ike_proposal) or not _proposal_is_safe(esp_proposal):
+        raise TestbedError("IKE and ESP proposals may contain only letters, digits, and hyphens.")
+    replacements = {
+        "{{ ike_proposals }}": ike_proposal,
+        "{{ esp_proposals }}": esp_proposal,
+        "{{ mode }}": mode,
+    }
+    outputs: list[Path] = []
+    for template_name, role in (
+        ("server_swanctl.conf.template", "server"),
+        ("client_swanctl.conf.template", "client"),
+    ):
+        content = _read_template(template_name)
+        for placeholder, value in replacements.items():
+            content = content.replace(placeholder, value)
+        if "{{" in content or "}}" in content:
+            raise TestbedError(f"Unresolved template placeholder in {template_name}")
+        output = CONFIG_DIR / role / "swanctl.conf"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(content, encoding="utf-8")
+        outputs.append(output)
+    return outputs[0], outputs[1]
+
+
+def build_label(ike: str, esp: str, mode: str, traffic: str, ip_version: str) -> str:
+    pfs = "pfs" if esp.endswith(("-ecp256", "-modp2048", "-modp3072", "-modp4096")) else "nopfs"
+    label = f"custom_{ike.replace('-', '')}_{esp.replace('-', '')}_{pfs}_{mode}_{ip_version}_{traffic}"
+    if not _SAFE_LABEL.fullmatch(label):
+        raise TestbedError("Generated capture label contains unsupported characters.")
+    return label
+
+
+def setup_testbed() -> list[str]:
+    """Build and start containers after validating the Compose configuration."""
+
+    compose = get_docker_compose_command()
+    PCAP_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_DIR.joinpath("server").mkdir(parents=True, exist_ok=True)
+    CONFIG_DIR.joinpath("client").mkdir(parents=True, exist_ok=True)
+    _run(compose + ["-f", str(COMPOSE_FILE), "config", "-q"])
+    _run(compose + ["-f", str(COMPOSE_FILE), "up", "-d", "--build"], timeout=180)
+    return compose
+
+
+def _docker_exec(arguments: Iterable[str], *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    return _run(["docker", "exec", *arguments], timeout=timeout)
+
+
+def _assert_security_association() -> None:
+    result = _docker_exec(["vpn-client", "swanctl", "--list-sas"])
+    if "ESTABLISHED" not in result.stdout.upper():
+        raise TestbedError(f"IKE SA did not reach ESTABLISHED state.\n{result.stdout}\n{result.stderr}")
+    state = _docker_exec(["vpn-client", "ip", "xfrm", "state"])
+    if not state.stdout.strip():
+        raise TestbedError("IKE SA was listed but no XFRM state was installed on vpn-client.")
+
+
+def _capture_start(label: str) -> None:
+    pcap_in_container = f"/pcaps/{label}.pcap"
+    _docker_exec(
+        [
+            "-d",
+            "vpn-sniffer",
+            "sh",
+            "-ec",
+            f"rm -f {pcap_in_container}; exec tcpdump -i eth0 -nn -s 0 -U "
+            f"'(udp port 500 or udp port 4500 or ip proto 50 or ip6 proto 50)' -w {pcap_in_container}",
+        ]
+    )
     time.sleep(1)
-    
-    # DIAGNOSTICS: Check if XFRM policies and states were actually installed
-    print("\n--- XFRM STATE ---")
-    print(run_cmd(["docker", "exec", "vpn-client", "ip", "xfrm", "state"]).stdout)
-    print("--- XFRM POLICY ---")
-    print(run_cmd(["docker", "exec", "vpn-client", "ip", "xfrm", "policy"]).stdout)
-    
-    # 5. Optional: Start iperf3 server if bulk
-    iperf_proc = None
-    if traffic == "bulk":
-        iperf_proc = run_cmd(["docker", "exec", "vpn-server", "iperf3", "-s"], background=True)
-        
-    # 6. Run Traffic Generator
-    print(f"Generating {traffic} traffic...")
-    gen_cmd = ["docker", "exec", "vpn-client", "python3", "/scripts/traffic_generator.py", "--type", traffic, "--duration", "2"]
 
-    if ip_version == "ipv6":
-        gen_cmd.append("--ipv6")
-    gen_res = run_cmd(gen_cmd)
-    print(gen_res.stdout)
-    if gen_res.stderr:
-        print(f"Gen Stderr: {gen_res.stderr}")
-    
-    # 7. Teardown
-    print("Terminating IPsec tunnel...")
-    run_cmd(["docker", "exec", "vpn-client", "swanctl", "--terminate", "--ike", "gw"])
-    
-    if iperf_proc:
-        iperf_proc.terminate()
-        
-    print("Stopping packet capture...")
-    # Killing tcpdump gracefully inside the container to flush PCAP
-    run_cmd(["docker", "exec", "vpn-sniffer", "killall", "-2", "tcpdump"])
-    time.sleep(0.5) # Give it time to flush to disk
-    
-    print(f"Experiment {label} complete.")
 
-def main():
+def _capture_stop() -> None:
+    try:
+        _docker_exec(["vpn-sniffer", "sh", "-c", "pkill -INT tcpdump || true"])
+        time.sleep(1)
+    except TestbedError:
+        # Preserve the root cause of an experiment; cleanup failure is logged by Docker on inspection.
+        pass
+
+
+def run_experiment(
+    label: str,
+    ike_prop: str,
+    esp_prop: str,
+    mode: str,
+    traffic: str,
+    duration: int = 15,
+    ip_version: str = "ipv4",
+) -> Path:
+    """Create one real testbed capture and reject silent partial success."""
+
+    if not _SAFE_LABEL.fullmatch(label):
+        raise TestbedError("Capture label contains unsupported characters.")
+    if traffic not in VALID_TRAFFIC:
+        raise TestbedError(f"Unsupported workload '{traffic}'. Expected one of {sorted(VALID_TRAFFIC)}.")
+    if ip_version not in VALID_IP_VERSIONS:
+        raise TestbedError(f"Unsupported IP version '{ip_version}'.")
+    if duration < 1 or duration > 300:
+        raise TestbedError("Traffic duration must be between 1 and 300 seconds.")
+
+    render_swanctl_configs(ike_prop, esp_prop, mode)
     setup_testbed()
-    
-    for config in CONFIG_MATRIX:
-        run_experiment(*config)
-        
-    print("\nAll experiments finished. Shutting down containers...")
-    run_cmd(DOCKER_COMPOSE_CMD + ["down"])
+    pcap_path = PCAP_DIR / f"{label}.pcap"
+    capture_started = False
+    initiated = False
+    try:
+        _docker_exec(["vpn-server", "swanctl", "--load-all"])
+        _docker_exec(["vpn-client", "swanctl", "--load-all"])
+        _capture_start(label)
+        capture_started = True
+        _docker_exec(["vpn-client", "swanctl", "--initiate", "--child", "net"], timeout=60)
+        initiated = True
+        _assert_security_association()
+        command = [
+            "vpn-client",
+            "python3",
+            "/scripts/traffic_generator.py",
+            "--type",
+            traffic,
+            "--duration",
+            str(duration),
+        ]
+        if ip_version == "ipv6":
+            command.append("--ipv6")
+        _docker_exec(command, timeout=duration + 30)
+    finally:
+        if initiated:
+            try:
+                _docker_exec(["vpn-client", "swanctl", "--terminate", "--ike", "gw"])
+            except TestbedError:
+                pass
+        if capture_started:
+            _capture_stop()
+    if not pcap_path.is_file() or pcap_path.stat().st_size <= 24:
+        raise TestbedError(f"Capture was not created or contains no packets: {pcap_path}")
+    return pcap_path
+
+
+def teardown_testbed() -> None:
+    compose = get_docker_compose_command()
+    _run(compose + ["-f", str(COMPOSE_FILE), "down"], timeout=120)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Control the local strongSwan testbed.")
+    parser.add_argument("command", choices=["preflight", "up", "down"])
+    args = parser.parse_args(argv)
+    if args.command == "preflight":
+        print(preflight())
+    elif args.command == "up":
+        setup_testbed()
+    else:
+        teardown_testbed()
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

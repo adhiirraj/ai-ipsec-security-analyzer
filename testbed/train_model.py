@@ -1,71 +1,75 @@
 #!/usr/bin/env python3
-import os
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
-import joblib
+"""Train the optional traffic-profile classifier from an explicitly supplied CSV."""
 
-def main():
-    dataset_path = "dataset.csv"
-    model_dir = "../data/models"
-    model_path = os.path.join(model_dir, "esp_traffic_classifier.pkl")
-    
-    if not os.path.exists(dataset_path):
-        print(f"Error: {dataset_path} not found. Did you run extract_features.py?")
-        return
-        
-    print(f"Loading dataset from {dataset_path}...")
-    df = pd.read_csv(dataset_path)
-    
-    if df.empty:
-        print("Error: Dataset is empty.")
-        return
-        
-    print(f"Dataset loaded. Total flows: {len(df)}")
-    print(f"Traffic distribution:\n{df['label'].value_counts()}\n")
-    
-    # Feature Selection: We ignore spi, src_ip, dst_ip as they are not behavioral characteristics
-    features = ['packet_count', 'total_bytes', 'mean_packet_size', 'std_packet_size', 'mean_iat', 'std_iat']
-    X = df[features]
-    y = df['label']
-    
-    # In a real scenario with massive data, we'd split into train/test. 
-    # With a small testbed dataset, we can still do a small split to evaluate.
-    # If the dataset is too small, train_test_split might complain, so we check size.
-    if len(df) > 20:
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import joblib
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+
+try:  # Supports both ``python testbed/train_model.py`` and package imports.
+    from .extract_features import FEATURE_COLUMNS, TESTBED_DIR
+except ImportError:  # pragma: no cover - direct script execution path
+    from extract_features import FEATURE_COLUMNS, TESTBED_DIR
+
+
+PROJECT_ROOT = TESTBED_DIR.parent
+DEFAULT_MODEL_PATH = PROJECT_ROOT / "data" / "models" / "esp_traffic_classifier.pkl"
+
+
+def train(dataset_path: Path, model_path: Path) -> tuple[RandomForestClassifier, float | None]:
+    """Train a deterministic model; reject datasets that cannot support classification."""
+
+    if not dataset_path.is_file():
+        raise FileNotFoundError(f"Dataset not found: {dataset_path}")
+    dataset = pd.read_csv(dataset_path)
+    required = set(FEATURE_COLUMNS) | {"label"}
+    missing = sorted(required.difference(dataset.columns))
+    if missing:
+        raise ValueError(f"Dataset is missing required columns: {', '.join(missing)}")
+    if dataset.empty:
+        raise ValueError("Dataset is empty")
+    labels = dataset["label"].astype(str)
+    if labels.nunique() < 2:
+        raise ValueError("At least two traffic labels are required to train a classifier")
+    features = dataset[list(FEATURE_COLUMNS)]
+    model = RandomForestClassifier(n_estimators=100, random_state=42, max_depth=5)
+    accuracy: float | None = None
+    counts = labels.value_counts()
+    if len(dataset) >= 20 and counts.min() >= 2:
+        x_train, x_test, y_train, y_test = train_test_split(
+            features, labels, test_size=0.3, random_state=42, stratify=labels
+        )
+        model.fit(x_train, y_train)
+        accuracy = float(accuracy_score(y_test, model.predict(x_test)))
     else:
-        print("Dataset very small, training and testing on the same set for demonstration.")
-        X_train, X_test, y_train, y_test = X, X, y, y
-        
-    print("Training Random Forest Classifier...")
-    clf = RandomForestClassifier(n_estimators=100, random_state=42, max_depth=5)
-    clf.fit(X_train, y_train)
-    
-    print("Evaluating Model...")
-    y_pred = clf.predict(X_test)
-    y_prob = clf.predict_proba(X_test)
-    
-    accuracy = accuracy_score(y_test, y_pred)
-    print(f"\n--- AI Classification Results ---")
-    print(f"Overall Accuracy: {accuracy * 100:.2f}%\n")
-    
-    # Display some sample predictions with AI Confidence Score
-    print("Sample Predictions vs Ground Truth:")
-    for i in range(min(5, len(y_test))):
-        true_label = y_test.iloc[i]
-        predicted_label = y_pred[i]
-        # Get confidence for the predicted class
-        class_idx = list(clf.classes_).index(predicted_label)
-        confidence = y_prob[i][class_idx] * 100
-        print(f"  Flow {i+1}: True=[{true_label:<4}] | Predicted=[{predicted_label:<4}] | AI Confidence: {confidence:.1f}%")
-        
-    # Save the model
-    os.makedirs(model_dir, exist_ok=True)
-    joblib.dump(clf, model_path)
-    print(f"\nModel saved successfully to: {model_path}")
-    print("This model can now be loaded by the main API dashboard!")
+        model.fit(features, labels)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, model_path)
+    return model, accuracy
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Train the optional ESP traffic-profile classifier")
+    parser.add_argument("--dataset", type=Path, default=TESTBED_DIR / "dataset.csv")
+    parser.add_argument("--model", type=Path, default=DEFAULT_MODEL_PATH)
+    args = parser.parse_args(argv)
+    try:
+        _model, accuracy = train(args.dataset, args.model)
+    except (FileNotFoundError, ValueError) as error:
+        parser.error(str(error))
+    if accuracy is None:
+        print("Model trained without a held-out score because the dataset is too small or unbalanced.")
+    else:
+        print(f"Held-out accuracy: {accuracy:.2%}")
+    print(f"Model saved to {args.model}")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

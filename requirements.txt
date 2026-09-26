@@ -1,3 +1,2 @@
-# The streaming PCAP reader used in Milestone 2 has no mandatory third-party
-# runtime dependency. Install these extras for later milestones and development.
--e .[protocol,data,dev]
+# Reproducible local development, dashboard, simulator, and test environment.
+-e .[all,dev]

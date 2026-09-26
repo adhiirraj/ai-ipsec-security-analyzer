@@ -1,132 +1,155 @@
 #!/usr/bin/env python3
-import socket
-import time
+"""Generate controlled testbed workloads through a configured IPsec tunnel.
+
+The UDP profiles are synthetic timing/size profiles. In particular, the
+``whatsapp`` profile is not captured WhatsApp, WebRTC, VoIP, or video traffic.
+"""
+
+from __future__ import annotations
+
 import argparse
-import sys
+from dataclasses import dataclass
+import socket
 import subprocess
+import time
 
-TARGET_IP = "10.0.0.2"
-VOIP_PORT = 5060
-WEB_PORT = 80
-SOCKET_FAMILY = socket.AF_INET
 
-def generate_voip(duration: int):
-    """Simulates VoIP traffic (e.g., G.711 codec). 160 bytes of payload every 20ms."""
-    print(f"Generating VoIP traffic for {duration} seconds...")
-    sock = socket.socket(SOCKET_FAMILY, socket.SOCK_DGRAM)
-    payload = b'A' * 160
-    end_time = time.time() + duration
-    packets_sent = 0
+WORKLOADS = ("voip", "web", "bulk", "icmp", "video", "whatsapp", "email")
 
-    while time.time() < end_time:
-        sock.sendto(payload, (TARGET_IP, VOIP_PORT))
-        packets_sent += 1
-        time.sleep(0.02) # 20ms
 
-    print(f"Sent {packets_sent} VoIP packets.")
+@dataclass(frozen=True)
+class TrafficSettings:
+    target_ip: str = "10.0.0.2"
+    socket_family: int = socket.AF_INET
 
-def generate_web(duration: int):
-    """Simulates Web Browsing (HTTP GET and small response)."""
-    # Since we don't have a real web server running on the server container right now,
-    # we will just send TCP SYN packets or use UDP to simulate the asymmetric nature,
-    # OR we can just use curl against a netcat on the server, but for simplicity,
-    # let's just send asymmetric UDP bursts to simulate web flow if we don't care about TCP state,
-    # BUT IPsec ESP doesn't care about TCP/UDP, it just encrypts the IP payload.
-    # To be realistic for ML, TCP is better because of handshakes and ACKs.
-    # We can use iperf3 for web if we limit bandwidth and use small bursts, but custom socket is easier.
-    print(f"Generating Web traffic for {duration} seconds... (Simulated via TCP connection attempts)")
-    end_time = time.time() + duration
-    while time.time() < end_time:
-        try:
-            # We just attempt a connection. It will send a SYN. Server replies RST-ACK.
-            # This generates small packets.
-            sock = socket.socket(SOCKET_FAMILY, socket.SOCK_STREAM)
-            sock.settimeout(0.1)
-            sock.connect((TARGET_IP, WEB_PORT))
-            sock.sendall(b"GET / HTTP/1.1\r\nHost: server\r\n\r\n")
-            sock.recv(1024)
-            sock.close()
-        except Exception:
-            pass # We expect connection refused since no server is listening, but packets are sent!
-        time.sleep(0.2) # User reading time
 
-def generate_bulk(duration: int):
-    """Simulates Bulk transfer using iperf3."""
-    print(f"Generating Bulk traffic for {duration} seconds...")
+def settings_for_ip_version(ipv6: bool) -> TrafficSettings:
+    return TrafficSettings("fd00::2", socket.AF_INET6) if ipv6 else TrafficSettings()
+
+
+def _send_udp(
+    settings: TrafficSettings,
+    port: int,
+    payload: bytes,
+    duration: int,
+    interval: float,
+    burst: int = 1,
+) -> int:
+    deadline = time.monotonic() + duration
+    sent = 0
+    with socket.socket(settings.socket_family, socket.SOCK_DGRAM) as sock:
+        while time.monotonic() < deadline:
+            for _ in range(burst):
+                sock.sendto(payload, (settings.target_ip, port))
+                sent += 1
+            time.sleep(interval)
+    if sent == 0:
+        raise RuntimeError("UDP workload sent no packets before its deadline.")
+    return sent
+
+
+def generate_voip(settings: TrafficSettings, duration: int) -> None:
+    count = _send_udp(settings, 5060, b"A" * 160, duration, 0.02)
+    print(f"Synthetic VoIP-like UDP profile: sent {count} packets to the test receiver.")
+
+
+def generate_web(settings: TrafficSettings, duration: int) -> None:
+    """Make real HTTP requests to the testbed's local HTTP server."""
+
+    deadline = time.monotonic() + duration
+    requests = 0
+    url = f"http://[{settings.target_ip}]/" if settings.socket_family == socket.AF_INET6 else f"http://{settings.target_ip}/"
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["curl", "--fail", "--silent", "--show-error", "--max-time", "3", url],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"HTTP workload failed against {url}: {result.stderr.strip()}")
+        requests += 1
+        time.sleep(0.2)
+    print(f"Web workload: completed {requests} HTTP requests to the test server.")
+
+
+def generate_bulk(settings: TrafficSettings, duration: int) -> None:
+    result = subprocess.run(
+        ["iperf3", "-c", settings.target_ip, "-t", str(duration), "-b", "10M"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"iperf3 bulk workload failed: {result.stderr.strip() or result.stdout.strip()}")
+    print("Bulk workload: iperf3 transfer completed against the test server.")
+
+
+def generate_icmp(settings: TrafficSettings, duration: int) -> None:
+    command = ["ping", "-c", str(duration), settings.target_ip]
+    if settings.socket_family == socket.AF_INET6:
+        command.insert(1, "-6")
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"ICMP workload failed: {result.stderr.strip() or result.stdout.strip()}")
+    print("ICMP workload: ping replies received from the test server.")
+
+
+def generate_video(settings: TrafficSettings, duration: int) -> None:
+    count = _send_udp(settings, 5004, b"V" * 1300, duration, 0.03, burst=30)
+    print(f"Synthetic video-like UDP profile: sent {count} packets to the test receiver.")
+
+
+def generate_whatsapp(settings: TrafficSettings, duration: int) -> None:
+    count = _send_udp(settings, 3478, b"W" * 300, duration, 0.04)
+    print(
+        f"Synthetic chat-call-like UDP profile: sent {count} packets to the test receiver; "
+        "this is not WhatsApp traffic."
+    )
+
+
+def generate_email(settings: TrafficSettings, duration: int) -> None:
+    deadline = time.monotonic() + duration
+    connections = 0
+    while time.monotonic() < deadline:
+        with socket.create_connection((settings.target_ip, 143), timeout=3) as sock:
+            sock.sendall(b"A001 NOOP\r\n")
+        connections += 1
+        time.sleep(1)
+    print(f"Synthetic email-like TCP profile: opened {connections} connections to the test receiver.")
+
+
+GENERATORS = {
+    "voip": generate_voip,
+    "web": generate_web,
+    "bulk": generate_bulk,
+    "icmp": generate_icmp,
+    "video": generate_video,
+    "whatsapp": generate_whatsapp,
+    "email": generate_email,
+}
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Controlled synthetic traffic generator for the IPsec testbed")
+    parser.add_argument("--type", choices=WORKLOADS, required=True)
+    parser.add_argument("--duration", type=int, default=2, help="Duration in seconds (1-300)")
+    parser.add_argument("--ipv6", action="store_true", help="Send traffic to the IPv6 testbed endpoint")
+    args = parser.parse_args(argv)
+    if not 1 <= args.duration <= 300:
+        parser.error("--duration must be between 1 and 300 seconds")
+    return args
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     try:
-        subprocess.run(["iperf3", "-c", TARGET_IP, "-t", str(duration), "-b", "10M"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"iperf3 failed: {e}")
+        GENERATORS[args.type](settings_for_ip_version(args.ipv6), args.duration)
+    except (OSError, RuntimeError) as error:
+        print(f"Workload failed: {error}")
+        return 1
+    return 0
 
-def generate_icmp(duration: int):
-    """Simulates ICMP Ping traffic."""
-    print(f"Generating ICMP traffic for {duration} seconds...")
-    try:
-        # Ping the target IP for the duration (1 ping per second)
-        subprocess.run(["ping", "-c", str(duration), TARGET_IP], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"ping failed: {e}")
-
-def generate_video(duration: int):
-    """Simulates Video Streaming (Bursty UDP traffic with large MTU packets)."""
-    print(f"Generating Video streaming traffic for {duration} seconds...")
-    sock = socket.socket(SOCKET_FAMILY, socket.SOCK_DGRAM)
-    payload = b'V' * 1300 # Large packets typical for video
-    end_time = time.time() + duration
-
-    while time.time() < end_time:
-        # Send a burst of 30 frames (packets)
-        for _ in range(30):
-            sock.sendto(payload, (TARGET_IP, 5004)) # Standard RTP port
-        time.sleep(0.03) # ~30 FPS
-
-def generate_whatsapp(duration: int):
-    """Simulates WhatsApp Voice/Video Call (STUN/WebRTC-like over UDP)."""
-    print(f"Generating WhatsApp traffic for {duration} seconds...")
-    sock = socket.socket(SOCKET_FAMILY, socket.SOCK_DGRAM)
-    payload = b'W' * 300
-    end_time = time.time() + duration
-    while time.time() < end_time:
-        sock.sendto(payload, (TARGET_IP, 3478))
-        time.sleep(0.04)
-
-def generate_email(duration: int):
-    """Simulates E-mail (SMTP/IMAP) traffic."""
-    print(f"Generating E-mail traffic for {duration} seconds...")
-    end_time = time.time() + duration
-    while time.time() < end_time:
-        try:
-            sock = socket.socket(SOCKET_FAMILY, socket.SOCK_STREAM)
-            sock.settimeout(0.5)
-            sock.connect((TARGET_IP, 143))
-            sock.sendall(b"A001 LOGIN user pass\r\n")
-            sock.close()
-        except Exception:
-            pass
-        time.sleep(1.5)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Synthetic Traffic Generator")
-    parser.add_argument("--type", choices=["voip", "web", "bulk", "icmp", "video", "whatsapp", "email"], required=True)
-    parser.add_argument("--duration", type=int, default=2, help="Duration in seconds")
-    parser.add_argument("--ipv6", action="store_true", help="Use IPv6 instead of IPv4")
-    args = parser.parse_args()
-
-    if args.ipv6:
-        TARGET_IP = "fd00::2"
-        SOCKET_FAMILY = socket.AF_INET6
-
-    if args.type == "voip":
-        generate_voip(args.duration)
-    elif args.type == "web":
-        generate_web(args.duration)
-    elif args.type == "bulk":
-        generate_bulk(args.duration)
-    elif args.type == "icmp":
-        generate_icmp(args.duration)
-    elif args.type == "video":
-        generate_video(args.duration)
-    elif args.type == "whatsapp":
-        generate_whatsapp(args.duration)
-    elif args.type == "email":
-        generate_email(args.duration)
+    raise SystemExit(main())
